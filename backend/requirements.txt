@@ -17,12 +17,9 @@ cryptography>=42.0.0
 # ── Speech-to-Text & Diarization ──────────────────────────────
 faster-whisper>=1.0.0
 
-# ── PaddleOCR & Paddle Inference Engine ───────────────────────
-paddleocr>=2.7.0
-paddlepaddle          # CPU version (use paddlepaddle-gpu for CUDA)
-
-# ── Image Processing ──────────────────────────────────────────
+# ── Image Processing & OCR ────────────────────────────────────
 pillow>=10.0.0
+
 
 # ── Utilities, HTTP & Testing ─────────────────────────────────
 python-dotenv>=1.0.1
