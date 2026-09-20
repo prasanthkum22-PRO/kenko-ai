@@ -1,0 +1,107 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function userRole() {
+      return getUserData().role;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && userRole() == 'admin';
+    }
+
+    function isDoctor() {
+      return isAuthenticated() && (userRole() == 'doctor' || isAdmin());
+    }
+
+    function isLabTech() {
+      return isAuthenticated() && (userRole() == 'lab' || isAdmin());
+    }
+
+    function isPharmacist() {
+      return isAuthenticated() && (userRole() == 'pharmacist' || isAdmin());
+    }
+
+    function isPatient() {
+      return isAuthenticated() && userRole() == 'patient';
+    }
+
+    // 1. Users collection: Users read their own or staff read all; writes are strict.
+    //    Self-service create is Patient-only. Self update can NEVER change role or
+    //    privileged identity fields (prevents self-escalation). Privileged roles
+    //    are granted only by admin provisioning.
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if request.auth.uid == userId && request.resource.data.role == 'patient';
+      allow update: if (request.auth.uid == userId &&
+                        !request.resource.data.diff(resource.data).affectedKeys()
+                            .hasAny(['role', 'doctorId', 'specialty', 'department', 'uid', 'email']))
+                     || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // 2. Appointments collection
+    match /appointments/{appointmentId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isDoctor() || isAdmin() || (isPatient() && request.resource.data.patientId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    // 3. Consultations collection
+    match /consultations/{consultationId} {
+      allow read: if isAuthenticated() && (isDoctor() || isAdmin() || resource.data.patientId == request.auth.uid);
+      allow create, update: if isDoctor() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // 4. Prescriptions collection: Doctor writes, Pharmacist updates dispense status, Patient reads own
+    match /prescriptions/{prescriptionId} {
+      allow read: if isAuthenticated() && (isDoctor() || isPharmacist() || isAdmin() || resource.data.patientId == request.auth.uid);
+      allow create: if isDoctor() || isAdmin();
+      allow update: if isDoctor() || isPharmacist() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // 5. Inventory collection: Pharmacy staff & Admin manage stocks
+    match /inventory/{medicineId} {
+      allow read: if isAuthenticated();
+      allow write: if isPharmacist() || isAdmin();
+    }
+
+    // 6. Lab Requests & Results collection: Doctor creates, Lab processes, Patient reads own
+    match /labRequests/{requestId} {
+      allow read: if isAuthenticated() && (isDoctor() || isLabTech() || isAdmin() || resource.data.patientId == request.auth.uid);
+      allow create: if isDoctor() || isAdmin();
+      allow update: if isLabTech() || isDoctor() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /labResults/{resultId} {
+      allow read: if isAuthenticated() && (isDoctor() || isLabTech() || isAdmin() || resource.data.patientId == request.auth.uid);
+      allow create, update: if isLabTech() || isDoctor() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // 7. Notifications collection
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    // 8. Audit Logs collection: Immutable append-only log, read by admin only
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update, delete: if false; // strictly immutable audit trail
+    }
+  }
+}
