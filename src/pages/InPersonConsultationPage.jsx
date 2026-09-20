@@ -233,16 +233,22 @@ export default function InPersonConsultationPage() {
   const handleStart = async () => {
     let cId = consultationId;
     if (!cId) {
-      const created = await createConsultation({
-        patient_name: patientName,
-        patient_id: patientId,
-        patient_age: 38,
-        patient_gender: 'Male',
-        consultation_type: 'in_person',
-        has_consent: true,
-      });
-      cId = created.id;
-      setConsultationId(cId);
+      try {
+        const created = await createConsultation({
+          patient_name: patientName || 'Patient',
+          patient_id: patientId || 'P-' + Math.floor(1000 + Math.random() * 9000),
+          patient_age: 38,
+          patient_gender: 'Male',
+          consultation_type: 'in_person',
+          has_consent: true,
+        });
+        cId = created.id;
+        setConsultationId(cId);
+      } catch (err) {
+        console.warn('Backend unavailable, proceeding with local consultation session:', err);
+        cId = 'c-loc-' + Date.now();
+        setConsultationId(cId);
+      }
     }
 
     setIsRecording(true);
@@ -253,6 +259,7 @@ export default function InPersonConsultationPage() {
     ]);
 
     elapsedRef.current = 0;
+    if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
       elapsedRef.current += 1;
       setElapsedSeconds((s) => s + 1);
