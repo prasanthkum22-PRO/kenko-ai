@@ -56,9 +56,9 @@ export default function InPersonConsultationPage() {
   const { user } = useAuth();
 
   const [consultationId, setConsultationId] = useState(() => searchParams.get('id') || null);
-  const [patientName, setPatientName] = useState(() => searchParams.get('name') || '');
-  const [patientId, setPatientId] = useState(() => searchParams.get('pid') || '');
-  const [doctorName, setDoctorName] = useState(() => user?.name || user?.full_name || 'Attending Physician');
+  const [patientName, setPatientName] = useState('');
+  const [patientId, setPatientId] = useState('');
+  const [doctorName, setDoctorName] = useState(() => user?.name || 'Attending Physician');
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
 
   useEffect(() => {

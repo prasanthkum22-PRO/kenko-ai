@@ -64,9 +64,8 @@ export default function ConsultationsHubPage() {
       const created = await createConsultation({
         patient_name: patientName.trim(),
         patient_id: patientId.trim() || `P-${Math.floor(1000 + Math.random() * 9000)}`,
-        patient_age: Number(patientAge) || 38,
-        patient_gender: patientGender || 'Male',
-        doctor_name: user?.full_name || 'Dr. Aarav Patel',
+        patient_age: Number(patientAge),
+        patient_gender: patientGender,
         consultation_type: newType,
         has_consent: consentChecked,
       });
@@ -79,15 +78,8 @@ export default function ConsultationsHubPage() {
           : `/consultations/in-person?id=${created.id}`
       );
     } catch (err) {
-      console.warn('Backend unavailable, creating local session for consultation:', err);
-      const fallbackId = `c_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
-      success(`Session initialized for ${patientName.trim()}`, 'Consultation Ready');
-      setModalOpen(false);
-      navigate(
-        newType === 'video'
-          ? `/consultations/video?id=${fallbackId}&name=${encodeURIComponent(patientName.trim())}&pid=${encodeURIComponent(patientId.trim() || 'P-1002')}`
-          : `/consultations/in-person?id=${fallbackId}&name=${encodeURIComponent(patientName.trim())}&pid=${encodeURIComponent(patientId.trim() || 'P-1002')}`
-      );
+      console.error('Failed to create consultation:', err);
+      toastError('Failed to initialize consultation session.', 'Error');
     }
   };
 

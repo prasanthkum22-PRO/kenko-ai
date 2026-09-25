@@ -60,16 +60,16 @@ export default function VideoConsultationPage() {
   const [consultationId, setConsultationId] = useState(urlId || null);
   const [consultation, setConsultation] = useState(null);
 
-  const [patientName, setPatientName] = useState(() => searchParams.get('name') || '');
-  const [patientId, setPatientId] = useState(() => searchParams.get('pid') || '');
+  const [patientName, setPatientName] = useState('');
+  const [patientId, setPatientId] = useState('');
   const [patientAge, setPatientAge] = useState('');
   const [patientGender, setPatientGender] = useState('');
   const [patientLanguage, setPatientLanguage] = useState('English');
   const [doctorName, setDoctorName] = useState(
-    user?.name || user?.full_name
-      ? (user?.name || user?.full_name).startsWith('Dr.')
-        ? user?.name || user?.full_name
-        : `Dr. ${user?.name || user?.full_name}`
+    user?.name
+      ? user.name.startsWith('Dr.')
+        ? user.name
+        : `Dr. ${user.name}`
       : roleConfig?.name
       ? `Dr. ${roleConfig.name}`
       : 'Dr. Sarah Jenkins'
