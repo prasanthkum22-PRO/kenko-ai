@@ -22,7 +22,7 @@ import {
 
 const PIPELINE_STAGES = [
   { stage: '1. Speech Capture', desc: 'Ambient room or video call audio', icon: IconMic },
-  { stage: '2. faster-whisper', desc: 'Tamil / English / Code-Mix transcription', icon: IconWave },
+  { stage: '2. NVIDIA Cloud STT', desc: 'Tamil / English / Code-Mix transcription', icon: IconWave },
   { stage: '3. LLM Summarization', desc: 'Structured SOAP draft from transcript', icon: IconSparkle },
   { stage: '4. SOAP Review', desc: 'Verify, edit and confirm', icon: IconStethoscope },
   { stage: '5. FHIR Export', desc: 'Interoperable structured records', icon: IconActivity },
@@ -57,7 +57,7 @@ export default function DemoPage() {
           <div>
             <p className="text-xs font-bold text-warning">DEMO MODE — PRE-SEEDED EVALUATION DATASET</p>
             <p className="text-xs text-muted">
-              These records are fictional scenarios for evaluation and demonstration. Real live consultations use ambient microphone recording, faster-whisper, and Ollama local LLM without fake fallbacks.
+              These records are fictional scenarios for evaluation and demonstration. Real live consultations use ambient audio capture, NVIDIA Cloud STT, and deterministic clinical extraction without fake fallbacks.
             </p>
           </div>
         </div>
@@ -69,7 +69,7 @@ export default function DemoPage() {
           MediBridge AI <span className="text-gradient">End-to-End Evaluation Suite</span>
         </h1>
         <p className="text-sm text-secondary max-w-xl mx-auto mt-2">
-          From conversation to connected care: <strong>Voice → faster-whisper → Ollama → Follow-Up Intelligence → Doctor Review → Patient Timeline</strong>
+          From conversation to connected care: <strong>Audio → NVIDIA Cloud STT → Deterministic Extraction → Follow-Up Intelligence → Doctor Review → Patient Timeline</strong>
         </p>
       </div>
 

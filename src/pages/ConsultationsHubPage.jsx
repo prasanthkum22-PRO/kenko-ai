@@ -193,13 +193,31 @@ export default function ConsultationsHubPage() {
                   </div>
                   <span
                     className={`badge whitespace-nowrap ${
-                      c.consultation_type === 'video' ? 'badge-info' : 'badge-secondary'
+                      c.google_meeting_uri ? 'badge-primary' : (c.consultation_type === 'video' ? 'badge-info' : 'badge-secondary')
                     }`}
                   >
                     {c.consultation_type === 'video' ? <IconVideo size={13} /> : <IconMic size={13} />}
-                    {c.consultation_type === 'video' ? 'Video' : 'In-Person'}
+                    {c.google_meeting_uri ? 'Google Meet' : (c.consultation_type === 'video' ? 'Video' : 'In-Person')}
                   </span>
                 </div>
+
+                {c.google_meeting_uri && (
+                  <div
+                    className="flex items-center justify-between text-xs py-1.5 px-2.5 rounded"
+                    style={{ background: 'var(--color-bg-base)', border: '1px solid var(--color-border-subtle)' }}
+                  >
+                    <span className="text-muted truncate max-w-[170px]">Meet: {c.google_meeting_code || 'Active Space'}</span>
+                    <a
+                      href={c.google_meeting_uri}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary font-semibold hover:underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Join Meet ↗
+                    </a>
+                  </div>
+                )}
 
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-between">

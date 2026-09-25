@@ -1,7 +1,7 @@
 """
 MediBridge AI — Consultation & Speech-to-Text Endpoints
-Handles audio uploads, multilingual faster-whisper transcription,
-Ollama LLM clinical extraction, doctor verification, and grounded consultation chatbot.
+Handles audio uploads, NVIDIA Cloud STT transcription,
+deterministic clinical extraction, doctor verification, and grounded consultation chatbot.
 """
 
 import os
@@ -154,6 +154,12 @@ def list_consultations(
                 duration_seconds=c.duration_seconds,
                 has_consent=c.has_consent,
                 is_demo=c.is_demo,
+                google_space_name=c.google_space_name,
+                google_meeting_uri=c.google_meeting_uri,
+                google_meeting_code=c.google_meeting_code,
+                conference_record_name=c.conference_record_name,
+                meeting_status=c.meeting_status or "scheduled",
+                transcript_status=c.transcript_status or "pending",
                 created_at=c.created_at,
                 updated_at=c.updated_at,
                 transcript_count=t_count,
@@ -191,6 +197,12 @@ def get_consultation(id: str, db: Session = Depends(get_db)):
             "has_consent": c.has_consent,
             "is_demo": c.is_demo,
             "audio_path": c.audio_path,
+            "google_space_name": c.google_space_name,
+            "google_meeting_uri": c.google_meeting_uri,
+            "google_meeting_code": c.google_meeting_code,
+            "conference_record_name": c.conference_record_name,
+            "meeting_status": c.meeting_status,
+            "transcript_status": c.transcript_status,
             "created_at": c.created_at.isoformat(),
             "is_approved": latest_summary.is_doctor_approved if latest_summary else False,
         },
@@ -409,7 +421,7 @@ def update_transcript(
     return {"success": True, "message": "Transcript updated successfully."}
 
 
-@router.post("/{id}/summarize", summary="Generate structured clinical summary from transcript with Ollama LLM")
+@router.post("/{id}/summarize", summary="Generate structured clinical summary from transcript")
 def generate_summary(id: str, db: Session = Depends(get_db)):
     consultation = db.query(Consultation).filter(Consultation.id == id).first()
     if not consultation:

@@ -22,6 +22,11 @@ from app.routes import (
     role_dashboards_router,
     followups_router,
     demo_router,
+    google_router,
+    meet_router,
+    transcription_router,
+    doctor_router,
+    clinical_workspace_router,
 )
 
 # ── Environment ───────────────────────────────────────────────
@@ -77,8 +82,8 @@ async def lifespan(app: FastAPI):
 # ── App Instance ──────────────────────────────────────────────
 app = FastAPI(
     title="MediBridge AI Clinical Intelligence API",
-    description="From Conversation to Connected Care: Multilingual Ambient Speech-to-Text, Ollama Extraction & Follow-Up Intelligence",
-    version="2.1.0",
+    description="From Conversation to Connected Care: NVIDIA Cloud STT, Deterministic Clinical Extraction & Follow-Up Intelligence. Production: No local models.",
+    version="3.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
@@ -113,6 +118,12 @@ app.include_router(prescriptions_router)
 app.include_router(role_dashboards_router)
 app.include_router(followups_router)
 app.include_router(demo_router)
+app.include_router(google_router)
+app.include_router(meet_router)
+app.include_router(transcription_router)
+app.include_router(doctor_router)
+app.include_router(clinical_workspace_router)
+
 
 
 # ── Health Checks ─────────────────────────────────────────────
@@ -122,9 +133,10 @@ async def root():
         "service": "MediBridge AI Clinical Intelligence API",
         "tagline": "From Conversation to Connected Care",
         "status": "running",
-        "version": "2.1.0",
+        "version": "3.0.0",
         "differentiator": "Capture -> Understand -> Verify -> Personalize -> Route -> Follow Up",
-        "ai_stack": "faster-whisper + Ollama Local LLM + SQLite",
+        "ai_stack": "NVIDIA Cloud STT (whisper-large-v3) + Deterministic Clinical Extraction + SQLite",
+        "local_models": "none",
     }
 
 

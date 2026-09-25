@@ -1,4 +1,4 @@
-# Logs
+# ── Logs ─────────────────────────────────────────────────────
 logs
 *.log
 npm-debug.log*
@@ -7,40 +7,72 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# ── Node ──────────────────────────────────────────────────────
 node_modules
 dist
 dist-ssr
 *.local
 
-# Editor directories and files
+# ── Editor ───────────────────────────────────────────────────
 .vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
-# Environment files & Secrets
+
+# ── Environment & Secrets ─────────────────────────────────────
 .env
 .env.*
 !.env.example
 
-# Python
+# ── Python ───────────────────────────────────────────────────
 .venv/
 .venv-*/
 venv/
+backend/venv/
 __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
 .mypy_cache/
 
-# Databases
+# ── Databases ─────────────────────────────────────────────────
 *.db
 *.db-shm
 *.db-wal
 *.sqlite
 *.sqlite3
 
-# Uploads & Media (runtime generated)
+# ── Uploads & Media (runtime generated) ──────────────────────
 backend/uploads/
 !backend/uploads/.gitkeep
 
+# ── AI Model Weights & Caches (NEVER commit these) ───────────
+# Local Whisper / faster-whisper model files
+models/
+model_cache/
+*.gguf
+*.safetensors
+*.bin
 
+# HuggingFace / Transformers caches (local inference only)
+.cache/
+huggingface_cache/
+~/.cache/huggingface/
+HF_HOME/
+TRANSFORMERS_CACHE/
+
+# Pyannote audio model files
+pyannote_cache/
+
+# Ollama local model data
+ollama_models/
+
+# CTranslate2 converted model files
+ctranslate2_models/
+ct2_models/
+
+# Generic large model artifacts
+*.pt
+*.pth
+*.pkl
+*.onnx

@@ -42,6 +42,37 @@ def get_db():
 
 
 def init_db():
-    """Create all database tables on application startup."""
+    """Create all database tables and add any missing columns on application startup."""
     from app.models import db_models  # noqa: F401
     Base.metadata.create_all(bind=engine)
+
+    # Safe SQLite auto-migration for added columns
+    try:
+        with engine.connect() as conn:
+            # Check existing columns in consultations table
+            res = conn.exec_driver_sql("PRAGMA table_info(consultations)").fetchall()
+            existing_cols = {row[1] for row in res}
+
+            new_columns = [
+                ("google_space_name", "VARCHAR(256)"),
+                ("google_meeting_uri", "VARCHAR(512)"),
+                ("google_meeting_code", "VARCHAR(64)"),
+                ("conference_record_name", "VARCHAR(256)"),
+                ("google_oauth_user_id", "VARCHAR(128)"),
+                ("meeting_status", "VARCHAR(64) DEFAULT 'scheduled'"),
+                ("transcript_status", "VARCHAR(64) DEFAULT 'pending'"),
+                ("transcript_resource_name", "VARCHAR(256)"),
+                ("transcript_started_at", "DATETIME"),
+                ("transcript_ended_at", "DATETIME"),
+            ]
+
+            for col_name, col_type in new_columns:
+                if col_name not in existing_cols:
+                    try:
+                        conn.exec_driver_sql(f"ALTER TABLE consultations ADD COLUMN {col_name} {col_type}")
+                    except Exception:
+                        pass
+            conn.commit()
+    except Exception:
+        pass
+

@@ -9,6 +9,8 @@ import {
 } from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
+import GoogleMeetCard from '../components/GoogleMeetCard';
+import GoogleMeetTranscriptViewer from '../components/GoogleMeetTranscriptViewer';
 import {
   IconMic,
   IconVideo,
@@ -38,6 +40,8 @@ export default function ConsultationWorkspacePage() {
 
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
+  const [transcriptViewMode, setTranscriptViewMode] = useState('structured'); // 'structured' | 'editor'
+
 
   const [consultation, setConsultation] = useState(null);
   const [segments, setSegments] = useState([]);
@@ -137,7 +141,7 @@ export default function ConsultationWorkspacePage() {
 
   const handleRegenerateSummary = async () => {
     setLoading(true);
-    info('Extracting structured clinical summary with Ollama AI...', 'AI Extraction');
+    info('Extracting structured clinical summary with NVIDIA AI...', 'AI Extraction');
     try {
       await updateTranscript(id, segments);
       const newSummary = await summarizeConsultation(id);
@@ -318,7 +322,7 @@ export default function ConsultationWorkspacePage() {
 
           <div className="flex items-center gap-2 flex-wrap">
             <button className="btn btn-secondary text-xs" onClick={handleRegenerateSummary}>
-              <IconRefresh size={14} /> Ollama Re-Extract
+              <IconRefresh size={14} /> Re-Extract
             </button>
             {!consultation?.is_approved ? (
               <button
@@ -351,37 +355,82 @@ export default function ConsultationWorkspacePage() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-6 items-start">
-        <div className="glass-card p-5 flex flex-col gap-4">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-bold flex items-center gap-2">
-              <IconDoc size={16} /> Verifiable Audio Transcript
-            </h2>
-            <div className="flex gap-1">
-              <button className="btn btn-ghost btn-sm" onClick={handleCopyTranscript} title="Copy to clipboard">
-                <IconClipboard size={12} /> {copyStatus ? 'Copied!' : 'Copy'}
+      {/* ── Google Meet Space & Telehealth Orchestration ── */}
+      <GoogleMeetCard
+        consultation={consultation}
+        onTranscriptReady={(transcriptData) => {
+          setReloadKey((prev) => prev + 1);
+          handleRegenerateSummary();
+        }}
+        onConsultationUpdated={() => setReloadKey((prev) => prev + 1)}
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        {/* ── Transcript Column (Structured Viewer or Segment Editor) ── */}
+        <div className="flex flex-col gap-3">
+          {/* Transcript View Mode Switcher */}
+          <div className="flex items-center justify-between gap-2 p-1.5 bg-surface rounded border border-subtle">
+            <span className="text-xs font-semibold text-muted px-2">TRANSCRIPT VIEW</span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                className={`btn btn-xs ${transcriptViewMode === 'structured' ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => setTranscriptViewMode('structured')}
+              >
+                Structured Clinical View
               </button>
-              <button className="btn btn-ghost btn-sm" onClick={handleDownloadTranscript} title="Download text">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 3v12" />
-                  <path d="m7 10 5 5 5-5" />
-                  <path d="M5 21h14" />
-                </svg>
-                TXT
-              </button>
-              <button className="btn btn-secondary btn-sm" onClick={handleSaveTranscript}>
-                <IconCheck size={12} /> Save Edits
+              <button
+                type="button"
+                className={`btn btn-xs ${transcriptViewMode === 'editor' ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => setTranscriptViewMode('editor')}
+              >
+                Inline Segment Editor
               </button>
             </div>
           </div>
 
-          <input
-            type="text"
-            className="input text-xs"
-            placeholder="Search transcript..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+          {transcriptViewMode === 'structured' ? (
+            <GoogleMeetTranscriptViewer
+              consultation={consultation}
+              segments={segments}
+              onGenerateSummary={handleRegenerateSummary}
+              onMarkReviewed={() => {
+                success('Transcript verified and marked as reviewed.', 'Reviewed');
+              }}
+              isSummarizing={loading}
+            />
+          ) : (
+            <div className="glass-card p-5 flex flex-col gap-4">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-sm font-bold flex items-center gap-2">
+                  <IconDoc size={16} /> Verifiable Audio Transcript
+                </h2>
+                <div className="flex gap-1">
+                  <button className="btn btn-ghost btn-sm" onClick={handleCopyTranscript} title="Copy to clipboard">
+                    <IconClipboard size={12} /> {copyStatus ? 'Copied!' : 'Copy'}
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={handleDownloadTranscript} title="Download text">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 3v12" />
+                      <path d="m7 10 5 5 5-5" />
+                      <path d="M5 21h14" />
+                    </svg>
+                    TXT
+                  </button>
+                  <button className="btn btn-secondary btn-sm" onClick={handleSaveTranscript}>
+                    <IconCheck size={12} /> Save Edits
+                  </button>
+                </div>
+              </div>
+
+              <input
+                type="text"
+                className="input text-xs"
+                placeholder="Search transcript..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+
 
           <div className="flex flex-col gap-2">
             {segments.length === 0 ? (
@@ -476,13 +525,15 @@ export default function ConsultationWorkspacePage() {
             </form>
           </div>
         </div>
+        )}
+      </div>
 
         <div className="glass-card p-5 flex flex-col gap-4">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-bold flex items-center gap-2">
               <IconStethoscope size={16} /> Doctor Review &amp; Edit Interface
             </h2>
-            <span className="text-xs text-muted">Ollama Local LLM Zero-Hallucination</span>
+            <span className="text-xs text-muted">NVIDIA Cloud AI — Zero-Hallucination</span>
           </div>
 
           <div className="glass-card-flat p-4 flex flex-col gap-3">

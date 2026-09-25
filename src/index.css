@@ -304,6 +304,7 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -1034,6 +1035,7 @@ ul { list-style: none; }
   border: 1px solid transparent;
   transition: all var(--transition-fast);
   text-decoration: none !important;
+  -webkit-user-select: none;
   user-select: none;
   white-space: nowrap;
   font-family: var(--font-family);
@@ -1214,6 +1216,7 @@ select {
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   cursor: pointer;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -2545,6 +2548,7 @@ select {
   font-weight: 600;
   cursor: pointer;
   transition: all var(--transition-base);
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -2778,6 +2782,7 @@ select {
   align-items: center;
   gap: 9px;
   cursor: pointer;
+  -webkit-user-select: none;
   user-select: none;
   color: var(--color-text-secondary);
   font-weight: 500;
@@ -2846,6 +2851,7 @@ select {
   gap: 8px;
   margin-top: 6px;
   transition: all var(--transition-base);
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -3103,6 +3109,7 @@ select {
   align-items: center;
   justify-content: center;
   background: var(--color-bg-overlay);
+  -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   padding: 20px;
   animation: fadeIn 0.2s ease-out forwards;

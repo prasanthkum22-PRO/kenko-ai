@@ -324,7 +324,7 @@ export default function InPersonConsultationPage() {
       await uploadConsultationAudio(consultationId, audioBlob, elapsedSeconds);
 
       setCurrentStepIndex(2);
-      setProcessingStatus('Transcribing via faster-whisper (CTranslate2 int8 on CPU)...');
+      setProcessingStatus('Transcribing via NVIDIA Cloud STT (Whisper Large-v3)...');
       await transcribeConsultation(consultationId);
 
       setCurrentStepIndex(3);

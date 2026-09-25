@@ -12,6 +12,11 @@ import {
   IconActivity,
   IconSparkle,
   IconUsers,
+  IconStethoscope,
+  IconHeart,
+  IconBell,
+  IconCalendar,
+  IconShield,
 } from '../components/icons';
 
 /**
@@ -24,7 +29,11 @@ const NAV = {
       label: 'Administration',
       items: [
         { id: 'admin-overview', label: 'System Overview', to: '/admin', icon: IconDashboard, end: true },
-        { id: 'admin-users', label: 'User Accounts', to: '/admin?tab=users', icon: IconUsers },
+        { id: 'admin-applications', label: 'Doctor Applications', to: '/admin/doctors/applications', icon: IconStethoscope },
+        { id: 'admin-post-moderation', label: 'Post Moderation', to: '/admin/posts', icon: IconDoc },
+        { id: 'admin-users', label: 'User Accounts', to: '/admin/users', icon: IconUsers },
+        { id: 'admin-audit', label: 'Audit Logs', to: '/admin/audit', icon: IconActivity },
+        { id: 'admin-notifs', label: 'Notifications', to: '/notifications', icon: IconBell },
         { id: 'admin-demo', label: 'Demo Environment', to: '/demo', icon: IconSparkle },
       ],
     },
@@ -45,7 +54,8 @@ const NAV = {
       items: [
         { id: 'doc-overview', label: 'Doctor Overview', to: '/doctor', icon: IconDashboard, end: true },
         { id: 'doc-consults', label: 'Consultation Reviews', to: '/consultations', icon: IconDoc },
-        { id: 'doc-followups', label: 'Follow-Up Intelligence', to: '/followups', icon: IconClock },
+        { id: 'doc-followups', label: 'Follow-Up Alerts & Plans', to: '/doctor/follow-up', icon: IconClock },
+        { id: 'doc-notifs', label: 'Notifications', to: '/notifications', icon: IconBell },
       ],
     },
     {
@@ -57,19 +67,44 @@ const NAV = {
         { id: 'doc-ocr', label: 'Document OCR', to: '/ocr', icon: IconScan },
       ],
     },
+    {
+      label: 'Content',
+      items: [
+        { id: 'doc-posts', label: 'My Posts', to: '/doctor/posts', icon: IconSparkle },
+      ],
+    },
+  ],
+  doctor_pending: [
+    {
+      label: 'Application',
+      items: [
+        { id: 'pending-status', label: 'Application Status', to: '/apply-doctor/status', icon: IconClock },
+        { id: 'pending-notifs', label: 'Notifications', to: '/notifications', icon: IconBell },
+      ],
+    },
   ],
   patient: [
     {
-      label: 'Patient Home',
+      label: 'My Care Journey',
       items: [
-        { id: 'pat-overview', label: 'Care Summary', to: '/patient', icon: IconHome, end: true },
-        { id: 'pat-ocr', label: 'Document OCR', to: '/ocr', icon: IconScan },
+        { id: 'pat-overview', label: 'Dashboard', to: '/patient', icon: IconHome, end: true },
+        { id: 'pat-journey', label: 'Care Journey', to: '/patient/care-journey', icon: IconActivity },
+        { id: 'pat-meds', label: 'Medication Tracker', to: '/patient/medications', icon: IconPill },
+        { id: 'pat-followup', label: 'Follow-Up & Check-In', to: '/patient/follow-up', icon: IconClock },
+        { id: 'pat-calendar', label: 'Care Schedule', to: '/patient/calendar', icon: IconCalendar },
+        { id: 'pat-docs', label: 'Document Center', to: '/patient/documents', icon: IconDoc },
+        { id: 'pat-activity', label: 'Health Activity', to: '/patient/activity', icon: IconActivity },
+        { id: 'pat-summary', label: 'Health Summary', to: '/patient/health-summary', icon: IconShield },
       ],
     },
     {
       label: 'Care Services',
       items: [
         { id: 'pat-video', label: 'Telehealth Video', to: '/consultations/video', icon: IconVideo },
+        { id: 'pat-doctors', label: 'Find Doctors', to: '/doctors', icon: IconUsers },
+        { id: 'pat-posts', label: 'Health Posts', to: '/posts', icon: IconDoc },
+        { id: 'pat-notifs', label: 'Notifications', to: '/notifications', icon: IconBell },
+        { id: 'pat-apply-doctor', label: 'Become a Doctor', to: '/apply-doctor', icon: IconStethoscope },
       ],
     },
   ],
@@ -112,6 +147,7 @@ export function getRoleNavigation(role) {
 export const ROLE_HOME = {
   admin: '/admin',
   doctor: '/doctor',
+  doctor_pending: '/apply-doctor/status',
   nurse: '/nurse',
   lab: '/lab',
   pharmacist: '/pharmacy',

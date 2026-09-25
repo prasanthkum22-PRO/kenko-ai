@@ -1,0 +1,44 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // ─── 1. Doctor Verification Documents (Private) ───────────────────────────
+    match /doctor-documents/{userId}/{allPaths=**} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || request.auth.token.role == 'ADMIN');
+      allow write: if isOwner(userId) && request.resource.size < 10 * 1024 * 1024; // 10MB max
+    }
+
+    // ─── 2. Doctor Profile Photos (Public Read) ──────────────────────────────
+    match /doctor-profiles/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isOwner(userId) && request.resource.size < 5 * 1024 * 1024; // 5MB max
+    }
+
+    // ─── 3. Post Media & Educational Images (Public Read) ────────────────────
+    match /post-media/{postId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAuthenticated() && request.resource.size < 8 * 1024 * 1024;
+    }
+
+    // ─── 4. Clinical Documents (Patient & Doctor Private) ────────────────────
+    match /clinical-documents/{patientId}/{consultationId}/{allPaths=**} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == patientId ||
+        request.auth.token.role == 'DOCTOR' ||
+        request.auth.token.role == 'ADMIN'
+      );
+      allow write: if isAuthenticated() && (
+        request.auth.token.role == 'DOCTOR' ||
+        request.auth.token.role == 'ADMIN'
+      );
+    }
+  }
+}

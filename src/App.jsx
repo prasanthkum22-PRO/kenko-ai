@@ -28,7 +28,36 @@ const PharmacyWorkspace = lazy(() => import('./pages/pharmacy/PharmacyWorkspace'
 const PatientWorkspace = lazy(() => import('./pages/patient/PatientWorkspace'));
 const NurseDashboard = lazy(() => import('./pages/roles/NurseDashboard'));
 
+// Doctor application & moderation workflows
+const ApplyDoctorPage = lazy(() => import('./pages/doctor/ApplyDoctorPage'));
+const DoctorApplicationStatusPage = lazy(() => import('./pages/doctor/DoctorApplicationStatusPage'));
+const DoctorPostsPage = lazy(() => import('./pages/doctor/DoctorPostsPage'));
+const AdminControlCenter = lazy(() => import('./pages/admin/AdminControlCenter'));
+const AdminApplicationReviewPage = lazy(() => import('./pages/admin/AdminApplicationReviewPage'));
+const AdminPostReviewPage = lazy(() => import('./pages/admin/AdminPostReviewPage'));
+const DoctorsDirectoryPage = lazy(() => import('./pages/DoctorsDirectoryPage'));
+const PublicPostFeedPage = lazy(() => import('./pages/PublicPostFeedPage'));
+
+// Post-Consultation Clinical Workspace & Follow-Up Intelligence
+const DoctorConsultationWorkspacePage = lazy(() => import('./pages/doctor/DoctorConsultationWorkspacePage'));
+const DoctorFollowUpDashboardPage = lazy(() => import('./pages/doctor/DoctorFollowUpDashboardPage'));
+const DoctorFollowUpDetailPage = lazy(() => import('./pages/doctor/DoctorFollowUpDetailPage'));
+const DoctorPatientDetailPage = lazy(() => import('./pages/doctor/DoctorPatientDetailPage'));
+const PatientDashboardPage = lazy(() => import('./pages/patient/PatientDashboardPage'));
+const PatientCareJourneyPage = lazy(() => import('./pages/patient/PatientCareJourneyPage'));
+const PatientMedicationsPage = lazy(() => import('./pages/patient/PatientMedicationsPage'));
+const PatientConditionCheckInPage = lazy(() => import('./pages/patient/PatientConditionCheckInPage'));
+const PatientActivityPage = lazy(() => import('./pages/patient/PatientActivityPage'));
+const PatientHealthSummaryPage = lazy(() => import('./pages/patient/PatientHealthSummaryPage'));
+const PatientCalendarPage = lazy(() => import('./pages/patient/PatientCalendarPage'));
+const PatientDocumentsPage = lazy(() => import('./pages/patient/PatientDocumentsPage'));
+const PatientFollowUpPage = lazy(() => import('./pages/patient/PatientFollowUpPage'));
+const PatientHealthTimelinePage = lazy(() => import('./pages/patient/PatientHealthTimelinePage'));
+const NotificationCenterPage = lazy(() => import('./pages/NotificationCenterPage'));
+const NotificationPreferencesPage = lazy(() => import('./pages/NotificationPreferencesPage'));
+
 const DemoPage = lazy(() => import('./pages/DemoPage'));
+const LandingPage = lazy(() => import('./pages/LandingPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 const AccessDeniedPage = lazy(() => import('./pages/AccessDeniedPage'));
 
@@ -52,11 +81,11 @@ function RouteFallback() {
   );
 }
 
-/** Smart home redirect: send the user to their role workspace. */
+/** Smart home redirect: send authenticated users to workspace, guests to landing page. */
 function RoleHomeRedirect() {
   const { user, loading } = useAuth();
   if (loading) return <RouteFallback />;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <LandingPage />;
   return <Navigate to={roleHome(user?.role)} replace />;
 }
 
@@ -70,6 +99,7 @@ export default function App() {
               <Suspense fallback={<RouteFallback />}>
                 <Routes>
                   {/* Public routes */}
+                  <Route path="/landing" element={<LandingPage />} />
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/register" element={<RegisterPage />} />
 
@@ -136,7 +166,7 @@ export default function App() {
                       }
                     />
                     <Route
-                      path="/patient"
+                      path="/patient/workspace"
                       element={
                         <RoleGuard allowedRoles={['patient', 'admin']}>
                           <PatientWorkspace />
@@ -153,6 +183,199 @@ export default function App() {
                     <Route path="/prescriptions" element={<PrescriptionStudioPage />} />
                     <Route path="/ocr" element={<OCRPage />} />
                     <Route path="/followups" element={<FollowUpHubPage />} />
+
+                    {/* Doctor Application & Status */}
+                    <Route
+                      path="/apply-doctor"
+                      element={
+                        <RoleGuard allowedRoles={['patient', 'admin']}>
+                          <ApplyDoctorPage />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route path="/apply-doctor/status" element={<DoctorApplicationStatusPage />} />
+                    <Route path="/doctor-application-status" element={<Navigate to="/apply-doctor/status" replace />} />
+
+                    {/* Doctor Posts */}
+                    <Route
+                      path="/doctor/posts"
+                      element={
+                        <RoleGuard allowedRoles={['doctor', 'admin']}>
+                          <DoctorPostsPage />
+                        </RoleGuard>
+                      }
+                    />
+
+                    {/* Admin Moderation & Control Center */}
+                    <Route
+                      path="/admin/doctors/applications"
+                      element={
+                        <RoleGuard allowedRoles={['admin']}>
+                          <AdminControlCenter initialTab="applications" />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/admin/posts"
+                      element={
+                        <RoleGuard allowedRoles={['admin']}>
+                          <AdminControlCenter initialTab="posts" />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/admin/audit"
+                      element={
+                        <RoleGuard allowedRoles={['admin']}>
+                          <AdminControlCenter initialTab="audit" />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/admin/applications/:id"
+                      element={
+                        <RoleGuard allowedRoles={['admin']}>
+                          <AdminApplicationReviewPage />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/admin/posts/:id"
+                      element={
+                        <RoleGuard allowedRoles={['admin']}>
+                          <AdminPostReviewPage />
+                        </RoleGuard>
+                      }
+                    />
+
+                    {/* Post-Consultation Clinical Workspace & Follow-Up Routes */}
+                    <Route
+                      path="/doctor/consultations/:id"
+                      element={
+                        <RoleGuard allowedRoles={['doctor', 'admin']}>
+                          <DoctorConsultationWorkspacePage />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/doctor/consultations/:id/prescription"
+                      element={
+                        <RoleGuard allowedRoles={['doctor', 'admin']}>
+                          <DoctorConsultationWorkspacePage />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/doctor/follow-up"
+                      element={
+                        <RoleGuard allowedRoles={['doctor', 'admin']}>
+                          <DoctorFollowUpDashboardPage />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/doctor/follow-up/:id"
+                      element={
+                        <RoleGuard allowedRoles={['doctor', 'admin']}>
+                          <DoctorFollowUpDetailPage />
+                        </RoleGuard>
+                      }
+                    />
+                    {/* Patient Health Dashboard & Care System */}
+                    <Route
+                      path="/patient"
+                      element={
+                        <RoleGuard allowedRoles={['patient', 'admin']}>
+                          <PatientDashboardPage />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/patient/dashboard"
+                      element={
+                        <RoleGuard allowedRoles={['patient', 'admin']}>
+                          <PatientDashboardPage />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/patient/care-journey"
+                      element={
+                        <RoleGuard allowedRoles={['patient', 'admin']}>
+                          <PatientCareJourneyPage />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/patient/medications"
+                      element={
+                        <RoleGuard allowedRoles={['patient', 'admin']}>
+                          <PatientMedicationsPage />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/patient/medications/history"
+                      element={
+                        <RoleGuard allowedRoles={['patient', 'admin']}>
+                          <PatientMedicationsPage />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/patient/follow-up/:id/check-in"
+                      element={
+                        <RoleGuard allowedRoles={['patient', 'admin']}>
+                          <PatientConditionCheckInPage />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/patient/activity"
+                      element={
+                        <RoleGuard allowedRoles={['patient', 'admin']}>
+                          <PatientActivityPage />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/patient/health-summary"
+                      element={
+                        <RoleGuard allowedRoles={['patient', 'admin']}>
+                          <PatientHealthSummaryPage />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/patient/calendar"
+                      element={
+                        <RoleGuard allowedRoles={['patient', 'admin']}>
+                          <PatientCalendarPage />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/patient/documents"
+                      element={
+                        <RoleGuard allowedRoles={['patient', 'admin']}>
+                          <PatientDocumentsPage />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route
+                      path="/doctor/patients/:patientId"
+                      element={
+                        <RoleGuard allowedRoles={['doctor', 'admin']}>
+                          <DoctorPatientDetailPage />
+                        </RoleGuard>
+                      }
+                    />
+                    <Route path="/notifications" element={<NotificationCenterPage />} />
+                    <Route path="/settings/notifications" element={<NotificationPreferencesPage />} />
+
+                    {/* Public Doctor Directory & Health Posts */}
+                    <Route path="/doctors" element={<DoctorsDirectoryPage />} />
+                    <Route path="/posts" element={<PublicPostFeedPage />} />
 
                     {/* Legacy compatibility routes */}
                     <Route path="/roles/doctor" element={<Navigate to="/doctor" replace />} />

@@ -150,10 +150,85 @@ class ConsultationResponse(BaseModel):
     duration_seconds: int
     has_consent: bool
     is_demo: bool = False
+    google_space_name: Optional[str] = None
+    google_meeting_uri: Optional[str] = None
+    google_meeting_code: Optional[str] = None
+    conference_record_name: Optional[str] = None
+    meeting_status: Optional[str] = "scheduled"
+    transcript_status: Optional[str] = "pending"
     created_at: datetime
     updated_at: datetime
     transcript_count: int = 0
     is_approved: bool = False
+
+
+# ── Google Meet & OAuth Schemas ───────────────────────────────
+
+class GoogleAuthUrlResponse(BaseModel):
+    auth_url: str
+    state: str
+    is_configured: bool = True
+    message: Optional[str] = None
+
+
+class GoogleAuthStatusResponse(BaseModel):
+    is_connected: bool
+    email: Optional[str] = None
+    scopes: Optional[List[str]] = None
+    expires_at: Optional[str] = None
+    is_mock: bool = False
+
+
+class CreateGoogleMeetRequest(BaseModel):
+    consultationId: Optional[str] = Field(None, alias="consultationId")
+    consultation_id: Optional[str] = None
+    patientId: Optional[str] = Field(None, alias="patientId")
+    patient_id: Optional[str] = None
+
+    class Config:
+        populate_by_name = True
+
+
+class CreateGoogleMeetResponse(BaseModel):
+    success: bool
+    consultationId: str
+    spaceName: str
+    meetingUri: str
+    meetingCode: Optional[str] = None
+    message: Optional[str] = None
+
+
+class GoogleMeetStatusResponse(BaseModel):
+    consultationId: str
+    meetingStatus: str
+    transcriptStatus: str
+    spaceName: Optional[str] = None
+    meetingUri: Optional[str] = None
+    meetingCode: Optional[str] = None
+    conferenceRecordName: Optional[str] = None
+    hasTranscript: bool = False
+    participantCount: int = 0
+    message: Optional[str] = None
+
+
+class NormalizedTranscriptEntry(BaseModel):
+    speakerRole: str = "UNKNOWN"  # DOCTOR, PATIENT, UNKNOWN
+    participantId: Optional[str] = None
+    participantName: Optional[str] = None
+    text: str
+    startTime: Optional[str] = None
+    endTime: Optional[str] = None
+
+
+class NormalizedTranscriptResponse(BaseModel):
+    consultationId: str
+    entries: List[NormalizedTranscriptEntry]
+    transcriptStatus: str
+    googleSpaceName: Optional[str] = None
+    doctorName: Optional[str] = None
+    patientName: Optional[str] = None
+    isReviewed: bool = False
+
 
 
 # ── Chatbot Grounded Q&A Schemas ──────────────────────────────

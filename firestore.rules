@@ -7,101 +7,193 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function userRole() {
-      return getUserData().role;
+    function getUserRole() {
+      return request.auth.token.role != null
+        ? request.auth.token.role
+        : get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
 
     function isAdmin() {
-      return isAuthenticated() && userRole() == 'admin';
+      return isAuthenticated() && (getUserRole() == 'ADMIN' || getUserRole() == 'admin');
     }
 
     function isDoctor() {
-      return isAuthenticated() && (userRole() == 'doctor' || isAdmin());
+      return isAuthenticated() && (getUserRole() == 'DOCTOR' || getUserRole() == 'doctor' || isAdmin());
     }
 
-    function isLabTech() {
-      return isAuthenticated() && (userRole() == 'lab' || isAdmin());
-    }
-
-    function isPharmacist() {
-      return isAuthenticated() && (userRole() == 'pharmacist' || isAdmin());
-    }
-
-    function isPatient() {
-      return isAuthenticated() && userRole() == 'patient';
-    }
-
-    // 1. Users collection: Users read their own or staff read all; writes are strict.
-    //    Self-service create is Patient-only. Self update can NEVER change role or
-    //    privileged identity fields (prevents self-escalation). Privileged roles
-    //    are granted only by admin provisioning.
+    // ─── 1. USERS ─────────────────────────────────────────────────────────────
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if request.auth.uid == userId && request.resource.data.role == 'patient';
-      allow update: if (request.auth.uid == userId &&
-                        !request.resource.data.diff(resource.data).affectedKeys()
-                            .hasAny(['role', 'doctorId', 'specialty', 'department', 'uid', 'email']))
-                     || isAdmin();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      // Normal users cannot modify their own role, verification, or admin status
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'verificationStatus', 'accountStatus', 'adminStatus']))
+      );
       allow delete: if isAdmin();
     }
 
-    // 2. Appointments collection
+    // ─── 2. DOCTOR APPLICATIONS ───────────────────────────────────────────────
+    match /doctorApplications/{applicationId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        resource.data.userId == request.auth.uid
+      );
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      // Applicant can update only draft/pending; Admin can update status, reviewedBy, reviewedAt
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        (resource.data.userId == request.auth.uid && resource.data.status in ['DRAFT', 'REQUIRES_MORE_INFORMATION'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    // ─── 3. DOCTOR PROFILES ───────────────────────────────────────────────────
+    match /doctorProfiles/{doctorId} {
+      // Public directory allows reading verified doctor profiles
+      allow read: if true;
+      allow create: if isAdmin() || (isDoctor() && request.auth.uid == doctorId);
+      // Doctors can edit professional details; only admin can modify verification status
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        (request.auth.uid == doctorId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['verificationStatus', 'verifiedAt', 'verifiedBy']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    // ─── 4. POSTS ─────────────────────────────────────────────────────────────
+    match /posts/{postId} {
+      // Anyone can read PUBLISHED posts
+      allow read: if resource.data.status == 'PUBLISHED' ||
+        (isAuthenticated() && (resource.data.authorId == request.auth.uid || isAdmin()));
+      
+      allow create: if isDoctor() && request.resource.data.authorId == request.auth.uid;
+      
+      // Author can edit drafts; Admin can moderate and publish
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        (resource.data.authorId == request.auth.uid && resource.data.status in ['DRAFT', 'CHANGES_REQUESTED'] && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'reviewedBy', 'reviewedAt']))
+      );
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.authorId == request.auth.uid);
+    }
+
+    // ─── 5. APPOINTMENTS ──────────────────────────────────────────────────────
     match /appointments/{appointmentId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isDoctor() || isAdmin() || (isPatient() && request.resource.data.patientId == request.auth.uid);
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        resource.data.patientId == request.auth.uid ||
+        resource.data.doctorId == request.auth.uid
+      );
+      allow create: if isAuthenticated() && request.resource.data.patientId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        resource.data.patientId == request.auth.uid ||
+        resource.data.doctorId == request.auth.uid
+      );
       allow delete: if isAdmin();
     }
 
-    // 3. Consultations collection
+    // ─── 6. CONSULTATIONS ─────────────────────────────────────────────────────
     match /consultations/{consultationId} {
-      allow read: if isAuthenticated() && (isDoctor() || isAdmin() || resource.data.patientId == request.auth.uid);
-      allow create, update: if isDoctor() || isAdmin();
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        resource.data.patientId == request.auth.uid ||
+        resource.data.doctorId == request.auth.uid
+      );
+      allow create: if isDoctor() || isAdmin();
+      allow update: if isDoctor() || isAdmin();
+      allow delete: if isAdmin();
+
+      // Subcollection: Transcript Entries
+      match /transcriptEntries/{entryId} {
+        allow read: if isAuthenticated();
+        allow write: if isDoctor() || isAdmin();
+      }
+    }
+
+    // ─── 7. CLINICAL NOTES ────────────────────────────────────────────────────
+    match /clinicalNotes/{clinicalNoteId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        resource.data.doctorId == request.auth.uid ||
+        (resource.data.patientId == request.auth.uid && resource.data.status == 'APPROVED')
+      );
+      allow create: if isDoctor() || isAdmin();
+      allow update: if isDoctor() || isAdmin();
       allow delete: if isAdmin();
     }
 
-    // 4. Prescriptions collection: Doctor writes, Pharmacist updates dispense status, Patient reads own
+    // ─── 8. PRESCRIPTIONS ─────────────────────────────────────────────────────
     match /prescriptions/{prescriptionId} {
-      allow read: if isAuthenticated() && (isDoctor() || isPharmacist() || isAdmin() || resource.data.patientId == request.auth.uid);
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        resource.data.doctorId == request.auth.uid ||
+        (resource.data.patientId == request.auth.uid && resource.data.status in ['APPROVED', 'ISSUED'])
+      );
       allow create: if isDoctor() || isAdmin();
-      allow update: if isDoctor() || isPharmacist() || isAdmin();
+      allow update: if isDoctor() || isAdmin();
       allow delete: if isAdmin();
+
+      match /items/{itemId} {
+        allow read: if isAuthenticated();
+        allow write: if isDoctor() || isAdmin();
+      }
     }
 
-    // 5. Inventory collection: Pharmacy staff & Admin manage stocks
-    match /inventory/{medicineId} {
-      allow read: if isAuthenticated();
-      allow write: if isPharmacist() || isAdmin();
-    }
-
-    // 6. Lab Requests & Results collection: Doctor creates, Lab processes, Patient reads own
-    match /labRequests/{requestId} {
-      allow read: if isAuthenticated() && (isDoctor() || isLabTech() || isAdmin() || resource.data.patientId == request.auth.uid);
+    // ─── 9. FOLLOW-UP PLANS & CHECK-INS ───────────────────────────────────────
+    match /followUpPlans/{followUpId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        resource.data.patientId == request.auth.uid ||
+        resource.data.doctorId == request.auth.uid
+      );
       allow create: if isDoctor() || isAdmin();
-      allow update: if isLabTech() || isDoctor() || isAdmin();
+      allow update: if isDoctor() || isAdmin() || (resource.data.patientId == request.auth.uid);
+      allow delete: if isAdmin();
+
+      // Subcollection: Check-Ins (Patient reports signals)
+      match /checkIns/{checkInId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && request.resource.data.patientId == request.auth.uid;
+        allow update, delete: if isDoctor() || isAdmin();
+      }
+    }
+
+    // ─── 10. FOLLOW-UP TASKS ──────────────────────────────────────────────────
+    match /followUpTasks/{taskId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        resource.data.patientId == request.auth.uid ||
+        resource.data.doctorId == request.auth.uid
+      );
+      allow create: if isDoctor() || isAdmin();
+      // Patient can mark status (e.g. TAKEN / COMPLETED)
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        resource.data.patientId == request.auth.uid ||
+        resource.data.doctorId == request.auth.uid
+      );
       allow delete: if isAdmin();
     }
 
-    match /labResults/{resultId} {
-      allow read: if isAuthenticated() && (isDoctor() || isLabTech() || isAdmin() || resource.data.patientId == request.auth.uid);
-      allow create, update: if isLabTech() || isDoctor() || isAdmin();
-      allow delete: if isAdmin();
+    // ─── 11. USER NOTIFICATIONS ───────────────────────────────────────────────
+    match /notifications/{userId}/items/{notificationId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated();
+      allow update: if isOwner(userId) || isAdmin();
+      allow delete: if isOwner(userId) || isAdmin();
     }
 
-    // 7. Notifications collection
-    match /notifications/{notificationId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
-    }
-
-    // 8. Audit Logs collection: Immutable append-only log, read by admin only
+    // ─── 12. AUDIT LOGS ───────────────────────────────────────────────────────
     match /auditLogs/{logId} {
       allow read: if isAdmin();
       allow create: if isAuthenticated();
-      allow update, delete: if false; // strictly immutable audit trail
+      // Audit logs are strictly immutable
+      allow update, delete: if false;
     }
   }
 }

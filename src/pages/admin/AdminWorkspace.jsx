@@ -197,10 +197,10 @@ const kpis = [
 ];
 
 const systemServices = [
-  { id: 'ctranslate2', name: 'CTranslate2', desc: 'Model Inference Engine', status: 'Healthy', uptime: '99.99%', icon: IconChart, bg: 'var(--color-primary-light)', color: 'var(--color-primary)' },
-  { id: 'ollama', name: 'Ollama', desc: 'LLM Runtime Service', status: 'Healthy', uptime: '99.96%', icon: IconSparkle, bg: 'var(--color-blue-light)', color: 'var(--color-blue)' },
+  { id: 'nvidia-stt', name: 'NVIDIA Cloud STT', desc: 'Hosted Speech-to-Text API', status: 'Healthy', uptime: '99.99%', icon: IconChart, bg: 'var(--color-primary-light)', color: 'var(--color-primary)' },
+  { id: 'clinical-ai', name: 'Clinical AI Engine', desc: 'Deterministic Extraction Service', status: 'Healthy', uptime: '99.98%', icon: IconSparkle, bg: 'var(--color-blue-light)', color: 'var(--color-blue)' },
   { id: 'firestore', name: 'Firestore / EHR', desc: 'Database & Data Sync', status: 'Healthy', uptime: '99.98%', icon: IconDoc, bg: 'var(--color-success-light)', color: 'var(--color-success)' },
-  { id: 'voice-stt', name: 'Voice / STT', desc: 'Speech-to-Text Service', status: 'Healthy', uptime: '99.97%', icon: IconMic, bg: 'var(--color-primary-light)', color: 'var(--color-primary)' },
+  { id: 'voice-stt', name: 'Google Meet API', desc: 'Telehealth Integration', status: 'Healthy', uptime: '99.97%', icon: IconMic, bg: 'var(--color-primary-light)', color: 'var(--color-primary)' },
 ];
 
 export default function AdminWorkspace() {

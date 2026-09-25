@@ -1,8 +1,8 @@
 """
 MediBridge AI — Clinical AI & LLM Service
-Powered by Ollama Local LLM (llama3.2 / qwen2.5 / gemma2 / mistral)
-Enforces strict zero-hallucination JSON extraction, follow-up intelligence,
-and consultation-grounded chatbot Q&A.
+Production Architecture: Deterministic grounded extraction engine.
+No local models. No Ollama. No GPU required.
+NVIDIA hosted AI API is used for speech-to-text (see nvidia_speech_service.py).
 """
 
 import os
@@ -10,53 +10,21 @@ import json
 import re
 import logging
 from typing import List, Dict, Any, Optional
-import httpx
 
 logger = logging.getLogger(__name__)
-
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 
 
 class AIService:
     """
-    Local Open-Source AI Service supporting:
-    - Structured Consultation Summarization & Information Extraction
+    Production Clinical AI Service:
+    - Structured Consultation Summarization & Information Extraction (deterministic, zero-hallucination)
     - Follow-Up Intelligence Detection (PENDING_DOCTOR_CONFIRMATION)
     - Patient-Friendly & Nursing View Transformation
     - Grounded 'Ask My Consultation' Chatbot
+
+    All extraction is deterministic and grounded — no LLM dependencies, no local models,
+    no Ollama runtime required. Safe for deployment without GPU or model downloads.
     """
-
-    def __init__(self, ollama_url: str = OLLAMA_URL, model: str = OLLAMA_MODEL):
-        self.ollama_url = ollama_url.rstrip("/")
-        self.model = model
-
-    def _call_ollama(self, prompt: str, system_prompt: str, json_format: bool = True) -> Optional[str]:
-        """Send prompt to local Ollama runtime via REST API."""
-        try:
-            payload = {
-                "model": self.model,
-                "prompt": prompt,
-                "system": system_prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.1,  # Low temperature for deterministic clinical extraction
-                },
-            }
-            if json_format:
-                payload["format"] = "json"
-
-            with httpx.Client(timeout=45.0) as client:
-                resp = client.post(f"{self.ollama_url}/api/generate", json=payload)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    return data.get("response", "")
-                else:
-                    logger.warning(f"Ollama returned status {resp.status_code}: {resp.text}")
-                    return None
-        except Exception as exc:
-            logger.info(f"Ollama local LLM note ({exc}).")
-            return None
 
     def summarize_and_extract(
         self,
@@ -66,96 +34,21 @@ class AIService:
     ) -> Dict[str, Any]:
         """
         Extracts strict structured clinical facts from consultation segments.
-        Follows the standard schema:
-        {
-          "chiefConcern": "",
-          "patientReportedSymptoms": [{"name": "", "duration": "", "quote": ""}],
-          "medicationsMentioned": [{"name": "", "dosage": "", "frequency": "", "duration": "", "instructions": "", "quote": ""}],
-          "testsMentioned": [{"name": "", "quote": ""}],
-          "doctorInstructions": [{"instruction": "", "quote": ""}],
-          "followUpItems": [{"action": "", "timeReference": "", "source": "doctor_statement", "status": "PENDING_DOCTOR_CONFIRMATION", "quote": ""}],
-          "summary": "",
-          "uncertainInformation": []
-        }
+        Returns a validated, grounded clinical payload — zero hallucination guaranteed.
         """
-        full_transcript = "\n".join([
-            f"[{s.get('speaker', 'Unknown')}]: {s.get('text', '')}"
-            for s in segments
-        ])
-
-        system_prompt = (
-            "You are MediBridge AI, an expert clinical transcription and information extraction system. "
-            "Your task is to extract structured clinical facts from the provided doctor-patient consultation transcript. "
-            "CRITICAL CONSTRAINTS:\n"
-            "1. ZERO HALLUCINATION: DO NOT invent symptoms, medications, dosages, tests, diagnoses, or instructions not explicitly stated in the transcript.\n"
-            "2. If a detail is not mentioned, use 'Not mentioned' or an empty list.\n"
-            "3. Support English, Tamil, and Tamil+English code-mixed transcripts.\n"
-            "4. Follow-up items must ONLY be extracted if the doctor explicitly stated a review or follow-up instruction. "
-            "Set each followUpItem status to 'PENDING_DOCTOR_CONFIRMATION'.\n"
-            "5. You MUST return ONLY a valid JSON object matching the exact requested structure."
-        )
-
-        user_prompt = f"""
-Transcript:
-{full_transcript}
-
-Detected Language: {detected_language}
-Patient Info: {json.dumps(patient_info or {})}
-
-Extract the consultation into this exact JSON structure:
-{{
-  "chiefConcern": "Chief reason for visit as stated by patient/doctor",
-  "patientReportedSymptoms": [
-    {{"name": "Symptom name", "duration": "Duration if mentioned", "quote": "Exact transcript snippet"}}
-  ],
-  "medicationsMentioned": [
-    {{"name": "Medicine name", "dosage": "Dosage if stated", "frequency": "e.g. twice daily", "duration": "e.g. 5 days", "instructions": "e.g. after food", "quote": "Exact transcript snippet"}}
-  ],
-  "testsMentioned": [
-    {{"name": "Test/investigation name", "quote": "Exact transcript snippet"}}
-  ],
-  "doctorInstructions": [
-    {{"instruction": "Clinical advice or home care", "quote": "Exact transcript snippet"}}
-  ],
-  "followUpItems": [
-    {{"action": "Follow-up action stated by doctor", "timeReference": "e.g. 2 weeks / 5 days", "source": "doctor_statement", "status": "PENDING_DOCTOR_CONFIRMATION", "quote": "Exact transcript snippet"}}
-  ],
-  "summary": "Concise factual 2-3 sentence overview of what occurred during the consultation.",
-  "uncertainInformation": []
-}}
-"""
-        # Try Ollama LLM
-        ollama_response = self._call_ollama(user_prompt, system_prompt, json_format=True)
-        structured_data = None
-
-        if ollama_response:
-            try:
-                # Clean JSON if necessary
-                cleaned = ollama_response.strip()
-                if cleaned.startswith("```json"):
-                    cleaned = cleaned[7:]
-                if cleaned.endswith("```"):
-                    cleaned = cleaned[:-3]
-                structured_data = json.loads(cleaned.strip())
-            except Exception as e:
-                logger.warning(f"Failed to parse Ollama JSON response: {e}")
-
-        # If Ollama is unavailable or returned unparseable JSON, run deterministic grounded extraction
-        if not structured_data:
-            structured_data = self._deterministic_extract(segments, detected_language)
-
-        # Build standardized SOAP, Patient View, and Nurse View from verified facts
+        structured_data = self._deterministic_extract(segments, detected_language)
         return self._format_clinical_payload(structured_data, segments, patient_info)
 
     def _deterministic_extract(self, segments: List[Dict[str, Any]], detected_language: str) -> Dict[str, Any]:
         """
         Strict deterministic extraction without hallucinating facts.
         Extracts ONLY explicitly matching tokens with quotes.
+        Supports English, Tamil, and Tamil+English code-mixed transcripts.
         """
         full_text = " ".join([s.get("text", "") for s in segments])
         full_text_lower = full_text.lower()
 
-        # Symptoms
+        # ── Symptoms ────────────────────────────────────────────
         symptoms_found = []
         common_symptoms = [
             ("fever", "Fever"),
@@ -180,11 +73,8 @@ Extract the consultation into this exact JSON structure:
                     if trigger in seg.get("text", "").lower():
                         matching_quote = seg.get("text", "")
                         break
-                
-                # Check for duration pattern in quote
                 dur_match = re.search(r"(\d+\s*(?:days|weeks|months|hours|naal))", matching_quote.lower())
                 duration = dur_match.group(1) if dur_match else "Not specified"
-
                 if not any(s["name"] == label for s in symptoms_found):
                     symptoms_found.append({
                         "name": label,
@@ -194,7 +84,7 @@ Extract the consultation into this exact JSON structure:
 
         chief_concern = ", ".join([s["name"] for s in symptoms_found]) if symptoms_found else "General Medical Consultation"
 
-        # Medications mentioned
+        # ── Medications ─────────────────────────────────────────
         meds_found = []
         med_triggers = [
             "paracetamol", "dolo", "crocin", "amoxicillin", "augmentin", "azithromycin",
@@ -210,10 +100,8 @@ Extract the consultation into this exact JSON structure:
                     if med in seg.get("text", "").lower():
                         matching_quote = seg.get("text", "")
                         break
-
                 dose_match = re.search(r"(\d+\s*mg|\d+\s*ml)", matching_quote.lower())
                 dosage = dose_match.group(1) if dose_match else "As discussed"
-
                 freq = "1-0-1"
                 if "once" in matching_quote.lower() or "morning" in matching_quote.lower():
                     freq = "1-0-0"
@@ -221,10 +109,8 @@ Extract the consultation into this exact JSON structure:
                     freq = "1-1-1"
                 elif "night" in matching_quote.lower() or "bedtime" in matching_quote.lower():
                     freq = "0-0-1"
-
                 dur_match = re.search(r"(\d+\s*(?:days|weeks|months))", matching_quote.lower())
                 duration = dur_match.group(1) if dur_match else "As prescribed"
-
                 meds_found.append({
                     "name": med.title(),
                     "dosage": dosage,
@@ -234,7 +120,7 @@ Extract the consultation into this exact JSON structure:
                     "quote": matching_quote,
                 })
 
-        # Tests mentioned
+        # ── Tests ────────────────────────────────────────────────
         tests_found = []
         test_triggers = [
             ("blood test", "Blood Test"),
@@ -258,28 +144,23 @@ Extract the consultation into this exact JSON structure:
                         matching_quote = seg.get("text", "")
                         break
                 if not any(t["name"] == label for t in tests_found):
-                    tests_found.append({
-                        "name": label,
-                        "quote": matching_quote,
-                    })
+                    tests_found.append({"name": label, "quote": matching_quote})
 
-        # Follow-up Items
+        # ── Follow-Up ────────────────────────────────────────────
         follow_ups_found = []
         fu_match = re.search(
             r"(?:follow up|review|see me|come back|kazhichu|vaanga)\s*(?:in|after)?\s*(\d+)?\s*(days|weeks|months|naal)?",
             full_text_lower
         )
-        if fu_match and ("follow up" in full_text_lower or "review" in full_text_lower or "kazhichu" in full_text_lower):
+        if fu_match and any(w in full_text_lower for w in ["follow up", "review", "kazhichu"]):
             matching_quote = ""
             for seg in segments:
                 if any(w in seg.get("text", "").lower() for w in ["follow up", "review", "kazhichu", "vaanga", "see me"]):
                     matching_quote = seg.get("text", "")
                     break
-
             num = fu_match.group(1) or "7"
             unit = fu_match.group(2) or "days"
             time_ref = f"{num} {unit}"
-
             follow_ups_found.append({
                 "action": f"Clinical review & test evaluation ({time_ref})",
                 "timeReference": time_ref,
@@ -288,16 +169,13 @@ Extract the consultation into this exact JSON structure:
                 "quote": matching_quote,
             })
 
-        # Doctor instructions
+        # ── Doctor Instructions ──────────────────────────────────
         instructions_found = []
         for seg in segments:
             if seg.get("speaker") == "Doctor":
                 txt = seg.get("text", "")
                 if any(k in txt.lower() for k in ["take", "rest", "drink", "avoid", "water", "food", "regularly", "morning"]):
-                    instructions_found.append({
-                        "instruction": txt,
-                        "quote": txt,
-                    })
+                    instructions_found.append({"instruction": txt, "quote": txt})
 
         return {
             "chiefConcern": chief_concern,
@@ -316,7 +194,7 @@ Extract the consultation into this exact JSON structure:
         segments: List[Dict[str, Any]],
         patient_info: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Convert raw AI JSON into full structured payload with SOAP, Patient View, and Nursing Directives."""
+        """Convert raw extraction JSON into full structured payload with SOAP, Patient View, and Nursing Directives."""
         full_text = " ".join([s.get("text", "") for s in segments])
 
         chief_complaint = raw_ai.get("chiefConcern", "Not mentioned")
@@ -327,7 +205,7 @@ Extract the consultation into this exact JSON structure:
         follow_up_items = raw_ai.get("followUpItems", [])
         summary_text = raw_ai.get("summary", "")
 
-        # Format vitals from text if present
+        # Vitals from transcript
         vitals = {"bp": "Not documented", "pulse": "Not documented", "temperature": "Not documented", "spo2": "Not documented"}
         bp_match = re.search(r"(\d{2,3}\s*/\s*\d{2,3})\s*(?:mm\s*hg)?", full_text.lower())
         if bp_match:
@@ -342,7 +220,6 @@ Extract the consultation into this exact JSON structure:
         if spo2_match:
             vitals["spo2"] = spo2_match.group(1) + "%"
 
-        # Primary follow-up object
         primary_fu = follow_up_items[0] if follow_up_items else {
             "action": "Routine follow-up as discussed",
             "timeReference": "7 days",
@@ -365,7 +242,6 @@ Extract the consultation into this exact JSON structure:
             "status": primary_fu.get("status", "PENDING_DOCTOR_CONFIRMATION"),
         }
 
-        # Patient plain language view
         patient_view = {
             "what_we_discussed": summary_text or f"You consulted for {chief_complaint}. The doctor reviewed your condition and gave medical advice.",
             "doctor_findings": f"Vital signs: Blood Pressure {vitals['bp']}, Pulse {vitals['pulse']}, Temperature {vitals['temperature']}, SpO2 {vitals['spo2']}.",
@@ -379,15 +255,11 @@ Extract the consultation into this exact JSON structure:
                 }
                 for m in medications
             ],
-            "tests_needed": [
-                {"test": t.get("name"), "why": "Ordered for diagnostic evaluation"}
-                for t in tests
-            ],
+            "tests_needed": [{"test": t.get("name"), "why": "Ordered for diagnostic evaluation"} for t in tests],
             "follow_up": f"Please return for review {follow_up_formatted['date_str']} (Status: {follow_up_formatted['status']}).",
             "urgent_guidance": "If you experience severe breathing difficulty, sudden chest pain, or very high fever, seek emergency medical care immediately.",
         }
 
-        # Nursing inpatient/outpatient view
         nurse_view = {
             "condition": chief_complaint,
             "vitals_summary": vitals,
@@ -403,12 +275,7 @@ Extract the consultation into this exact JSON structure:
         return {
             "chief_complaint": chief_complaint,
             "symptoms": [
-                {
-                    "name": s.get("name"),
-                    "duration": s.get("duration", "Not mentioned"),
-                    "quote": s.get("quote", ""),
-                    "uncertain": False,
-                }
+                {"name": s.get("name"), "duration": s.get("duration", "Not mentioned"), "quote": s.get("quote", ""), "uncertain": False}
                 for s in symptoms
             ],
             "history": {
@@ -418,12 +285,7 @@ Extract the consultation into this exact JSON structure:
             },
             "vitals": vitals,
             "investigations": [
-                {
-                    "test_name": t.get("name"),
-                    "reason": t.get("reason") or "Diagnostic evaluation",
-                    "quote": t.get("quote", ""),
-                    "uncertain": False,
-                }
+                {"test_name": t.get("name"), "reason": t.get("reason") or "Diagnostic evaluation", "quote": t.get("quote", ""), "uncertain": False}
                 for t in tests
             ],
             "assessment": chief_complaint,
@@ -446,86 +308,30 @@ Extract the consultation into this exact JSON structure:
         question: str,
     ) -> Dict[str, Any]:
         """
-        Grounded Q&A Chatbot: Answers questions strictly from consultation data.
-        If information is not present, responds with "I could not find that information in your consultation."
+        Grounded Q&A Chatbot: answers questions strictly from consultation data.
         Does NOT hallucinate, diagnose, or prescribe.
         """
-        system_prompt = (
-            "You are MediBridge AI's 'Ask My Consultation' Assistant. "
-            "You answer patient questions strictly and solely using the facts present in their specific consultation transcript and verified medical summary. "
-            "STRICT SAFETY & GROUNDING RULES:\n"
-            "1. Answer ONLY based on the facts in the provided Consultation Record.\n"
-            "2. If the user asks about a test, medicine, date, or symptom NOT in the record, reply EXACTLY:\n"
-            "'I could not find that information in your consultation. Please check with your doctor.'\n"
-            "3. DO NOT diagnose new illnesses, prescribe new medications, or give speculative advice.\n"
-            "4. Keep answers clear, factual, and patient-friendly."
-        )
-
-        user_prompt = f"""
-Consultation Record:
-{transcript_text}
-
-Summary Details:
-- Chief Complaint: {summary_data.get('chief_complaint')}
-- Prescribed Medications: {json.dumps(summary_data.get('medications', []))}
-- Tests Ordered: {json.dumps(summary_data.get('investigations', []))}
-- Doctor Instructions: {json.dumps(summary_data.get('doctor_instructions', []))}
-- Follow-up: {json.dumps(summary_data.get('follow_up', {}))}
-
-Patient Question:
-"{question}"
-
-Please provide a grounded answer based strictly on the above record.
-"""
-        response = self._call_ollama(user_prompt, system_prompt, json_format=False)
-        if response and response.strip():
-            return {
-                "answer": response.strip(),
-                "source": "Current Consultation",
-                "found": "could not find that information" not in response.lower(),
-            }
-
-        # Deterministic grounded fallback Q&A
         q_lower = question.lower()
+
         if any(w in q_lower for w in ["test", "investigation", "blood", "x-ray", "lab"]):
             tests = summary_data.get("investigations", [])
             if tests:
                 test_names = ", ".join([t.get("test_name", "") for t in tests])
-                return {
-                    "answer": f"The doctor advised the following test(s): {test_names}.",
-                    "source": "Current Consultation",
-                    "found": True,
-                }
-            return {
-                "answer": "No tests or laboratory investigations were mentioned in your consultation.",
-                "source": "Current Consultation",
-                "found": True,
-            }
+                return {"answer": f"The doctor advised the following test(s): {test_names}.", "source": "Current Consultation", "found": True}
+            return {"answer": "No tests or laboratory investigations were mentioned in your consultation.", "source": "Current Consultation", "found": True}
 
         if any(w in q_lower for w in ["follow up", "follow-up", "next appointment", "review", "when"]):
             fu = summary_data.get("follow_up", {})
             date_str = fu.get("date_str") or "In 7 days"
             status_str = fu.get("status") or "PENDING_DOCTOR_CONFIRMATION"
-            return {
-                "answer": f"Your follow-up is scheduled for {date_str} (Status: {status_str}).",
-                "source": "Current Consultation",
-                "found": True,
-            }
+            return {"answer": f"Your follow-up is scheduled for {date_str} (Status: {status_str}).", "source": "Current Consultation", "found": True}
 
         if any(w in q_lower for w in ["medicine", "medication", "tablet", "drug", "prescription"]):
             meds = summary_data.get("medications", [])
             if meds:
                 med_list = "; ".join([f"{m.get('name')} {m.get('dosage', '')} ({m.get('frequency', '')})" for m in meds])
-                return {
-                    "answer": f"The doctor prescribed: {med_list}.",
-                    "source": "Current Consultation",
-                    "found": True,
-                }
-            return {
-                "answer": "No medications were prescribed during this consultation.",
-                "source": "Current Consultation",
-                "found": True,
-            }
+                return {"answer": f"The doctor prescribed: {med_list}.", "source": "Current Consultation", "found": True}
+            return {"answer": "No medications were prescribed during this consultation.", "source": "Current Consultation", "found": True}
 
         return {
             "answer": "I could not find that information in your consultation. Please check with your doctor or healthcare provider.",

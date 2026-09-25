@@ -1,6 +1,8 @@
-# MediBridge AI Backend Requirements
+# MediBridge AI Backend — Production Requirements
 # ─────────────────────────────────────────────────────────────
 # Install: pip install -r requirements.txt
+# Architecture: NVIDIA Cloud STT + Deterministic Extraction
+# No local models. No GPU required. No Ollama. No faster-whisper.
 
 # ── Web Framework ─────────────────────────────────────────────
 fastapi>=0.115.0
@@ -14,16 +16,15 @@ sqlalchemy>=2.0.0
 PyJWT>=2.8.0
 cryptography>=42.0.0
 
-# ── Speech-to-Text & Diarization ──────────────────────────────
-faster-whisper>=1.0.0
+# ── Speech-to-Text (NVIDIA Cloud — no local download) ─────────
+# All STT handled by NVIDIA hosted API (nvidia_speech_service.py).
+# No faster-whisper. No pyannote.audio. No CTranslate2. No HF token.
 
 # ── Image Processing & OCR ────────────────────────────────────
 pillow>=10.0.0
-
 
 # ── Utilities, HTTP & Testing ─────────────────────────────────
 python-dotenv>=1.0.1
 aiofiles>=24.1.0
 httpx>=0.27.0
 pytest>=8.0.0
-
