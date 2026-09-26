@@ -522,19 +522,21 @@ export default function AppointmentsPage() {
   };
 
   return (
-    <div className="page-container max-w-7xl mx-auto py-6 px-4 md:px-6">
+    <div className="page-container max-w-7xl mx-auto px-4 md:px-6" style={{ paddingTop: '24px', paddingBottom: '48px' }}>
       {/* ─── Header & KPI Summary ─── */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6" style={{ marginTop: '8px' }}>
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight">Appointments & Care Schedule</h1>
+            <h1 className="text-2xl font-extrabold tracking-tight" style={{ color: 'var(--color-text-primary, #1e293b)' }}>
+              Appointments & Care Schedule
+            </h1>
             {isRealtimeActive && (
-              <span className="badge badge-success flex items-center gap-1.5 py-0.5 px-2 text-xs font-semibold">
+              <span className="badge badge-success flex items-center gap-1.5 py-1 px-2.5 text-xs font-semibold" style={{ borderRadius: '12px' }}>
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Realtime Sync
               </span>
             )}
           </div>
-          <p className="text-sm text-muted mt-1">
+          <p className="text-sm text-muted mt-1" style={{ color: 'var(--color-text-secondary, #64748b)' }}>
             Schedule, manage, and attend high-definition Telehealth Google Meet consultations and in-person clinic visits.
           </p>
         </div>
@@ -543,7 +545,8 @@ export default function AppointmentsPage() {
           <button
             id="book-appointment-btn"
             onClick={() => setShowBookModal(true)}
-            className="btn btn-primary flex items-center gap-2 w-full md:w-auto justify-center shadow-lg hover:shadow-primary/25 transition-all"
+            className="btn btn-primary flex items-center gap-2 w-full md:w-auto justify-center shadow-lg transition-all"
+            style={{ padding: '10px 20px', borderRadius: '12px', fontWeight: 700 }}
           >
             <IconPlus size={18} />
             <span>Book New Appointment</span>
@@ -553,7 +556,7 @@ export default function AppointmentsPage() {
 
       {/* ─── KPI Stats Bar ─── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <div className="glass-card-flat p-4 border border-border/50 relative overflow-hidden">
+        <div className="glass-card-flat p-4 border border-border/50 relative overflow-hidden" style={{ borderRadius: '16px' }}>
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted uppercase tracking-wider">Total Appointments</span>
             <div className="p-2 rounded-lg bg-primary/10 text-primary">
@@ -564,7 +567,7 @@ export default function AppointmentsPage() {
           <span className="text-[11px] text-muted">All scheduled & past sessions</span>
         </div>
 
-        <div className="glass-card-flat p-4 border border-border/50 relative overflow-hidden">
+        <div className="glass-card-flat p-4 border border-border/50 relative overflow-hidden" style={{ borderRadius: '16px' }}>
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted uppercase tracking-wider">Upcoming</span>
             <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
@@ -575,7 +578,7 @@ export default function AppointmentsPage() {
           <span className="text-[11px] text-muted">Active clinical bookings</span>
         </div>
 
-        <div className="glass-card-flat p-4 border border-border/50 relative overflow-hidden">
+        <div className="glass-card-flat p-4 border border-border/50 relative overflow-hidden" style={{ borderRadius: '16px' }}>
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted uppercase tracking-wider">Telehealth Video</span>
             <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400">
@@ -586,7 +589,7 @@ export default function AppointmentsPage() {
           <span className="text-[11px] text-muted">Google Meet Telehealth consultations</span>
         </div>
 
-        <div className="glass-card-flat p-4 border border-border/50 relative overflow-hidden">
+        <div className="glass-card-flat p-4 border border-border/50 relative overflow-hidden" style={{ borderRadius: '16px' }}>
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted uppercase tracking-wider">Completed</span>
             <div className="p-2 rounded-lg bg-purple-500/10 text-purple-400">
@@ -599,9 +602,9 @@ export default function AppointmentsPage() {
       </div>
 
       {/* ─── Filter & Search Bar ─── */}
-      <div className="glass-card-flat p-4 mb-6 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+      <div className="glass-card-flat p-4 mb-6 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4" style={{ borderRadius: '16px' }}>
         {/* Filter Tabs */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0" style={{ scrollbarWidth: 'none' }}>
           {[
             { id: 'upcoming', label: 'Upcoming' },
             { id: 'all', label: 'All' },
@@ -609,27 +612,40 @@ export default function AppointmentsPage() {
             { id: 'in_person', label: 'In-Person' },
             { id: 'completed', label: 'Completed' },
             { id: 'cancelled', label: 'Cancelled' },
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setFilterTab(tab.id)}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
-                filterTab === tab.id
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'bg-surface-alt/60 text-muted hover:text-foreground hover:bg-surface-alt'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+          ].map(tab => {
+            const isActive = filterTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setFilterTab(tab.id)}
+                style={{
+                  padding: '7px 16px',
+                  borderRadius: '20px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                  whiteSpace: 'nowrap',
+                  backgroundColor: isActive ? 'var(--color-primary, #3b82f6)' : 'var(--color-bg-subtle, #e2e8f0)',
+                  color: isActive ? '#ffffff' : 'var(--color-text-secondary, #475569)',
+                  border: isActive ? '1px solid var(--color-primary, #3b82f6)' : '1px solid transparent',
+                  boxShadow: isActive ? '0 4px 12px rgba(59, 130, 246, 0.35)' : 'none',
+                }}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Search & Specialization filter */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap md:flex-nowrap">
           <select
             value={selectedSpecialty}
             onChange={e => setSelectedSpecialty(e.target.value)}
-            className="input text-xs py-1.5 px-3 min-w-[150px]"
+            className="input"
+            style={{ fontSize: '12px', height: '36px', minWidth: '150px', borderRadius: '10px' }}
           >
             {SPECIALIZATIONS.map(s => (
               <option key={s} value={s}>{s}</option>
@@ -641,7 +657,8 @@ export default function AppointmentsPage() {
             placeholder="Search doctor, patient, reason..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="input text-xs py-1.5 px-3 w-full md:w-56"
+            className="input"
+            style={{ fontSize: '12px', height: '36px', minWidth: '220px', borderRadius: '10px' }}
           />
         </div>
       </div>
