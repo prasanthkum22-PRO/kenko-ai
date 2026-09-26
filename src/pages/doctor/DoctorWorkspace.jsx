@@ -55,73 +55,33 @@ export default function DoctorWorkspace() {
         setConsultations(cList || []);
         setLabTasks(lList || []);
 
-        // Load appointments from backend and fallback to Firebase
-        let backendAppts = wsData?.scheduled_appointments || [];
-        if (backendAppts.length === 0) {
-          try {
-            const aptRes = await getAppointments();
-            if (aptRes?.appointments) {
-              backendAppts = aptRes.appointments.map((item) => {
-                const a = item.appointment || item;
-                return {
-                  id: a.id,
-                  patientId: a.patientId || a.patient_id,
-                  patientName: item.patient?.displayName || a.patient_name || a.patientName || 'Patient',
-                  patientAge: item.patient?.age || a.patient_age || a.patientAge,
-                  patientGender: item.patient?.gender || a.patient_gender || a.patientGender,
-                  doctorId: a.doctorId || a.doctor_id,
-                  doctorName: item.doctor?.displayName || a.doctor_name || a.doctorName || 'Dr. Specialist',
-                  doctorSpecialization: item.doctor?.specialization || a.doctor_specialization || a.doctorSpecialization,
-                  appointmentType: (a.consultationType || a.appointment_type || a.appointmentType || 'video').toLowerCase(),
-                  scheduledAt: a.scheduledStart || a.scheduled_at || a.scheduledAt,
-                  reason: a.reason || 'General Consultation',
-                  status: (a.status || 'SCHEDULED').toUpperCase(),
-                  meetStatus: item.googleMeet?.status || a.meet_status || a.meetStatus || 'SCHEDULED',
-                  googleMeetingUri: item.googleMeet?.meetingUri || a.google_meeting_uri || a.googleMeetingUri,
-                  googleMeetingCode: item.googleMeet?.meetingCode || a.google_meeting_code || a.googleMeetingCode,
-                  googleSpaceName: item.googleMeet?.spaceName || a.google_space_name || a.googleSpaceName,
-                };
-              });
-            }
-          } catch (err) {
-            console.warn('Backend getAppointments fallback to Firestore:', err?.message);
-          }
+        // Load appointments directly from Firebase Firestore (Pure Firebase)
+        try {
+          const fsAppts = await listUserAppointmentsFirestore(user?.uid, 'doctor');
+          const normalizedFs = (fsAppts || []).map((a) => ({
+            id: a.id,
+            patientId: a.patientId || a.patient_id,
+            patientName: a.patientName || a.patient_name || 'Patient',
+            patientAge: a.patientAge || a.patient_age,
+            patientGender: a.patientGender || a.patient_gender,
+            doctorId: a.doctorId || a.doctor_id,
+            doctorName: a.doctorName || a.doctor_name || 'Dr. Specialist',
+            doctorSpecialization: a.doctorSpecialization || a.doctor_specialization || 'General Medicine',
+            appointmentType: (a.consultationType || a.appointment_type || a.appointmentType || 'video').toLowerCase(),
+            scheduledAt: a.scheduledStart?.toDate ? a.scheduledStart.toDate().toISOString() : (a.scheduledStart || a.scheduled_at),
+            reason: a.reason || 'General Consultation',
+            status: (a.status || 'SCHEDULED').toUpperCase(),
+            meetStatus: a.meetStatus || a.meet_status || 'SCHEDULED',
+            googleMeetingUri: a.googleMeetingUri || a.google_meeting_uri,
+            googleMeetingCode: a.googleMeetingCode || a.google_meeting_code,
+            googleSpaceName: a.googleSpaceName || a.google_space_name,
+            consultationId: a.consultationId || a.consultation_id,
+          })).sort((a, b) => new Date(b.scheduledAt || 0) - new Date(a.scheduledAt || 0));
+
+          if (active) setAppointments(normalizedFs);
+        } catch (fsErr) {
+          console.warn('Firestore direct fetch error:', fsErr);
         }
-
-        // Fetch from Firestore
-        const fsAppts = await listUserAppointmentsFirestore(user?.uid, 'doctor');
-        const normalizedFs = (fsAppts || []).map((a) => ({
-          id: a.id,
-          patientId: a.patientId || a.patient_id,
-          patientName: a.patientName || a.patient_name || 'Patient',
-          patientAge: a.patientAge || a.patient_age,
-          patientGender: a.patientGender || a.patient_gender,
-          doctorId: a.doctorId || a.doctor_id,
-          doctorName: a.doctorName || a.doctor_name || 'Dr. Specialist',
-          doctorSpecialization: a.doctorSpecialization || a.doctor_specialization || 'General Medicine',
-          appointmentType: (a.consultationType || a.appointment_type || 'video').toLowerCase(),
-          scheduledAt: a.scheduledStart?.toDate ? a.scheduledStart.toDate().toISOString() : (a.scheduledStart || a.scheduled_at),
-          reason: a.reason || 'General Consultation',
-          status: (a.status || 'SCHEDULED').toUpperCase(),
-          meetStatus: a.meetStatus || 'SCHEDULED',
-          googleMeetingUri: a.googleMeetingUri || a.google_meeting_uri,
-          googleMeetingCode: a.googleMeetingCode || a.google_meeting_code,
-          googleSpaceName: a.googleSpaceName || a.google_space_name,
-        }));
-
-        // Merge backend + firestore uniquely
-        const mergedMap = new Map();
-        backendAppts.forEach((a) => mergedMap.set(a.id, a));
-        normalizedFs.forEach((a) => {
-          const existing = mergedMap.get(a.id) || {};
-          mergedMap.set(a.id, { ...existing, ...a });
-        });
-
-        const mergedList = Array.from(mergedMap.values()).sort(
-          (a, b) => new Date(b.scheduledAt || 0) - new Date(a.scheduledAt || 0)
-        );
-
-        if (active) setAppointments(mergedList);
       } catch (err) {
         console.error('Failed to load doctor workspace:', err);
       } finally {
@@ -131,41 +91,33 @@ export default function DoctorWorkspace() {
 
     loadData();
 
-    // Setup Firestore realtime listener for doctor appointments
+    // Setup Firestore realtime listener for doctor appointments (Pure Firebase)
     try {
       unsubscribeAppointments = listenToUserAppointmentsFirestore(user?.uid, 'doctor', (liveList) => {
         if (!active) return;
         setIsRealtimeActive(true);
-        if (liveList && liveList.length > 0) {
-          setAppointments((prev) => {
-            const map = new Map();
-            prev.forEach((p) => map.set(p.id, p));
-            liveList.forEach((f) => {
-              const existing = map.get(f.id) || {};
-              map.set(f.id, {
-                ...existing,
-                id: f.id,
-                patientId: f.patientId || f.patient_id || existing.patientId,
-                patientName: f.patientName || f.patient_name || existing.patientName || 'Patient',
-                patientAge: f.patientAge || f.patient_age || existing.patientAge,
-                patientGender: f.patientGender || f.patient_gender || existing.patientGender,
-                doctorId: f.doctorId || f.doctor_id || existing.doctorId,
-                doctorName: f.doctorName || f.doctor_name || existing.doctorName || 'Dr. Specialist',
-                doctorSpecialization: f.doctorSpecialization || f.doctor_specialization || existing.doctorSpecialization || 'General Medicine',
-                appointmentType: (f.consultationType || f.appointment_type || existing.appointmentType || 'video').toLowerCase(),
-                scheduledAt: f.scheduledStart?.toDate ? f.scheduledStart.toDate().toISOString() : (f.scheduledStart || f.scheduled_at || existing.scheduledAt),
-                reason: f.reason || existing.reason || 'General Consultation',
-                status: (f.status || existing.status || 'SCHEDULED').toUpperCase(),
-                meetStatus: f.meetStatus || existing.meetStatus || 'SCHEDULED',
-                googleMeetingUri: f.googleMeetingUri || existing.googleMeetingUri,
-                googleMeetingCode: f.googleMeetingCode || existing.googleMeetingCode,
-                googleSpaceName: f.googleSpaceName || existing.googleSpaceName,
-              });
-            });
-            return Array.from(map.values()).sort(
-              (a, b) => new Date(b.scheduledAt || 0) - new Date(a.scheduledAt || 0)
-            );
-          });
+        if (Array.isArray(liveList)) {
+          const normalized = liveList.map((f) => ({
+            id: f.id,
+            patientId: f.patientId || f.patient_id,
+            patientName: f.patientName || f.patient_name || 'Patient',
+            patientAge: f.patientAge || f.patient_age,
+            patientGender: f.patientGender || f.patient_gender,
+            doctorId: f.doctorId || f.doctor_id,
+            doctorName: f.doctorName || f.doctor_name || 'Dr. Specialist',
+            doctorSpecialization: f.doctorSpecialization || f.doctor_specialization || 'General Medicine',
+            appointmentType: (f.consultationType || f.appointment_type || f.appointmentType || 'video').toLowerCase(),
+            scheduledAt: f.scheduledStart?.toDate ? f.scheduledStart.toDate().toISOString() : (f.scheduledStart || f.scheduled_at),
+            reason: f.reason || 'General Consultation',
+            status: (f.status || 'SCHEDULED').toUpperCase(),
+            meetStatus: f.meetStatus || f.meet_status || 'SCHEDULED',
+            googleMeetingUri: f.googleMeetingUri || f.google_meeting_uri,
+            googleMeetingCode: f.googleMeetingCode || f.google_meeting_code,
+            googleSpaceName: f.googleSpaceName || f.google_space_name,
+            consultationId: f.consultationId || f.consultation_id,
+          })).sort((a, b) => new Date(b.scheduledAt || 0) - new Date(a.scheduledAt || 0));
+
+          setAppointments(normalized);
         }
       });
     } catch (listenerErr) {

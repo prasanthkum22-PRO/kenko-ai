@@ -59,62 +59,27 @@ export default function DoctorDashboard() {
         const data = await getDoctorWorkspace().catch(() => null);
         if (active && data) setWorkspace(data);
 
-        // Load appointments from backend
-        let apptList = data?.scheduled_appointments || [];
-        if (apptList.length === 0) {
-          try {
-            const aptRes = await getAppointments();
-            if (aptRes?.appointments) {
-              apptList = aptRes.appointments.map((item) => {
-                const a = item.appointment || item;
-                return {
-                  id: a.id,
-                  patientId: a.patientId || a.patient_id,
-                  patientName: item.patient?.displayName || a.patient_name || 'Patient',
-                  patientAge: item.patient?.age || a.patient_age,
-                  patientGender: item.patient?.gender || a.patient_gender,
-                  doctorId: a.doctorId || a.doctor_id,
-                  doctorName: item.doctor?.displayName || a.doctor_name || 'Dr. Specialist',
-                  appointmentType: (a.consultationType || a.appointment_type || 'video').toLowerCase(),
-                  scheduledAt: a.scheduledStart || a.scheduled_at,
-                  reason: a.reason || 'General Consultation',
-                  status: (a.status || 'SCHEDULED').toUpperCase(),
-                };
-              });
-            }
-          } catch (e) {
-            console.warn('Backend getAppointments fallback in DoctorDashboard:', e);
-          }
+        // Load appointments directly from Firebase Firestore (Pure Firebase)
+        try {
+          const fsAppts = await listUserAppointmentsFirestore(user?.uid, 'doctor');
+          const normalizedFs = (fsAppts || []).map((a) => ({
+            id: a.id,
+            patientId: a.patientId || a.patient_id,
+            patientName: a.patientName || a.patient_name || 'Patient',
+            patientAge: a.patientAge || a.patient_age,
+            patientGender: a.patientGender || a.patient_gender,
+            doctorId: a.doctorId || a.doctor_id,
+            doctorName: a.doctorName || a.doctor_name || 'Dr. Specialist',
+            appointmentType: (a.consultationType || a.appointment_type || 'video').toLowerCase(),
+            scheduledAt: a.scheduledStart?.toDate ? a.scheduledStart.toDate().toISOString() : (a.scheduledStart || a.scheduled_at),
+            reason: a.reason || 'General Consultation',
+            status: (a.status || 'SCHEDULED').toUpperCase(),
+          })).sort((a, b) => new Date(b.scheduledAt || 0) - new Date(a.scheduledAt || 0));
+
+          if (active) setAppointments(normalizedFs);
+        } catch (fsErr) {
+          console.warn('Firestore fetch error in DoctorDashboard:', fsErr);
         }
-
-        // Fetch from Firestore
-        const fsAppts = await listUserAppointmentsFirestore(user?.uid, 'doctor');
-        const normalizedFs = (fsAppts || []).map((a) => ({
-          id: a.id,
-          patientId: a.patientId || a.patient_id,
-          patientName: a.patientName || a.patient_name || 'Patient',
-          patientAge: a.patientAge || a.patient_age,
-          patientGender: a.patientGender || a.patient_gender,
-          doctorId: a.doctorId || a.doctor_id,
-          doctorName: a.doctorName || a.doctor_name || 'Dr. Specialist',
-          appointmentType: (a.consultationType || a.appointment_type || 'video').toLowerCase(),
-          scheduledAt: a.scheduledStart?.toDate ? a.scheduledStart.toDate().toISOString() : (a.scheduledStart || a.scheduled_at),
-          reason: a.reason || 'General Consultation',
-          status: (a.status || 'SCHEDULED').toUpperCase(),
-        }));
-
-        const mergedMap = new Map();
-        apptList.forEach((a) => mergedMap.set(a.id, a));
-        normalizedFs.forEach((a) => {
-          const existing = mergedMap.get(a.id) || {};
-          mergedMap.set(a.id, { ...existing, ...a });
-        });
-
-        const merged = Array.from(mergedMap.values()).sort(
-          (a, b) => new Date(b.scheduledAt || 0) - new Date(a.scheduledAt || 0)
-        );
-
-        if (active) setAppointments(merged);
       } catch (err) {
         console.error('Failed to load doctor workspace:', err);
       } finally {
@@ -124,36 +89,27 @@ export default function DoctorDashboard() {
 
     loadData();
 
-    // Setup realtime Firestore listener
+    // Setup realtime Firestore listener (Pure Firebase)
     try {
       unsubscribeAppointments = listenToUserAppointmentsFirestore(user?.uid, 'doctor', (liveList) => {
         if (!active) return;
         setIsRealtimeActive(true);
-        if (liveList && liveList.length > 0) {
-          setAppointments((prev) => {
-            const map = new Map();
-            prev.forEach((p) => map.set(p.id, p));
-            liveList.forEach((f) => {
-              const existing = map.get(f.id) || {};
-              map.set(f.id, {
-                ...existing,
-                id: f.id,
-                patientId: f.patientId || f.patient_id || existing.patientId,
-                patientName: f.patientName || f.patient_name || existing.patientName || 'Patient',
-                patientAge: f.patientAge || f.patient_age || existing.patientAge,
-                patientGender: f.patientGender || f.patient_gender || existing.patientGender,
-                doctorId: f.doctorId || f.doctor_id || existing.doctorId,
-                doctorName: f.doctorName || f.doctor_name || existing.doctorName || 'Dr. Specialist',
-                appointmentType: (f.consultationType || f.appointment_type || existing.appointmentType || 'video').toLowerCase(),
-                scheduledAt: f.scheduledStart?.toDate ? f.scheduledStart.toDate().toISOString() : (f.scheduledStart || f.scheduled_at || existing.scheduledAt),
-                reason: f.reason || existing.reason || 'General Consultation',
-                status: (f.status || existing.status || 'SCHEDULED').toUpperCase(),
-              });
-            });
-            return Array.from(map.values()).sort(
-              (a, b) => new Date(b.scheduledAt || 0) - new Date(a.scheduledAt || 0)
-            );
-          });
+        if (Array.isArray(liveList)) {
+          const normalized = liveList.map((f) => ({
+            id: f.id,
+            patientId: f.patientId || f.patient_id,
+            patientName: f.patientName || f.patient_name || 'Patient',
+            patientAge: f.patientAge || f.patient_age,
+            patientGender: f.patientGender || f.patient_gender,
+            doctorId: f.doctorId || f.doctor_id,
+            doctorName: f.doctorName || f.doctor_name || 'Dr. Specialist',
+            appointmentType: (f.consultationType || f.appointment_type || 'video').toLowerCase(),
+            scheduledAt: f.scheduledStart?.toDate ? f.scheduledStart.toDate().toISOString() : (f.scheduledStart || f.scheduled_at),
+            reason: f.reason || 'General Consultation',
+            status: (f.status || 'SCHEDULED').toUpperCase(),
+          })).sort((a, b) => new Date(b.scheduledAt || 0) - new Date(a.scheduledAt || 0));
+
+          setAppointments(normalized);
         }
       });
     } catch (e) {
