@@ -27,13 +27,14 @@ router = APIRouter(prefix="/api/google", tags=["Google OAuth"])
 
 @router.get("/auth", response_model=GoogleAuthUrlResponse, summary="Get Google Meet OAuth Authorization URL")
 def get_google_auth_url(
+    return_url: Optional[str] = Query(None),
     current_user: Optional[User] = Depends(get_current_user),
 ):
     """
     Returns the Google OAuth 2.0 authorization URL requesting Meet space creation & readonly scopes.
     """
     user_id = current_user.id if current_user else "default_doctor"
-    res = google_oauth_service.generate_auth_url(user_id=user_id)
+    res = google_oauth_service.generate_auth_url(user_id=user_id, return_url=return_url)
     return GoogleAuthUrlResponse(
         auth_url=res["auth_url"],
         state=res["state"],
@@ -54,11 +55,12 @@ async def google_oauth_callback(
     and saves them securely server-side. Redirects user back to frontend consultations page.
     """
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    default_redirect = f"{frontend_url}/consultations"
 
     if error:
         logger.warning(f"Google OAuth denied or returned error: {error}")
         return RedirectResponse(
-            url=f"{frontend_url}/consultations?google_auth=error&error_msg={error}",
+            url=f"{default_redirect}?google_auth=error&error_msg={error}",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -70,14 +72,16 @@ async def google_oauth_callback(
 
     try:
         res = await google_oauth_service.exchange_code(code=code, state=state or "", db=db)
+        target_url = res.get("return_url") or default_redirect
+        sep = "&" if "?" in target_url else "?"
         return RedirectResponse(
-            url=f"{frontend_url}/consultations?google_auth=success&email={res.get('email', '')}",
+            url=f"{target_url}{sep}google_auth=success&email={res.get('email', '')}",
             status_code=status.HTTP_302_FOUND,
         )
     except Exception as exc:
         logger.error(f"Google OAuth exchange error: {exc}")
         return RedirectResponse(
-            url=f"{frontend_url}/consultations?google_auth=failed&error_msg=TokenExchangeError",
+            url=f"{default_redirect}?google_auth=failed&error_msg=TokenExchangeError",
             status_code=status.HTTP_302_FOUND,
         )
 

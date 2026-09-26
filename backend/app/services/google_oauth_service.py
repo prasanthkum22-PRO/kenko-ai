@@ -61,18 +61,23 @@ class GoogleOAuthService:
         """Checks whether real Google Cloud OAuth credentials have been provided."""
         return bool(self.client_id and self.client_secret)
 
-    def generate_auth_url(self, user_id: str) -> Dict[str, Any]:
+    def generate_auth_url(self, user_id: str, return_url: Optional[str] = None) -> Dict[str, Any]:
         """
         Builds the Google OAuth 2.0 authorization URL.
-        Includes a state parameter with a cryptographic token and user identifier.
+        Includes a state parameter with a cryptographic token, user identifier, and return_url.
         """
         nonce = secrets.token_urlsafe(16)
-        state_data = json.dumps({"uid": user_id, "nonce": nonce})
+        state_payload = {"uid": user_id, "nonce": nonce}
+        if return_url:
+            state_payload["return_url"] = return_url
+        state_data = json.dumps(state_payload)
         state_encoded = urllib.parse.quote(state_data)
 
         if not self.is_configured:
             # Provide mock/test auth URL that will handle local simulation gracefully
-            mock_auth_url = f"{self.frontend_url}/consultations?google_mock_auth=success&uid={user_id}&state={state_encoded}"
+            mock_target = return_url or f"{self.frontend_url}/consultations"
+            sep = "&" if "?" in mock_target else "?"
+            mock_auth_url = f"{mock_target}{sep}google_mock_auth=success&uid={user_id}&state={state_encoded}"
             return {
                 "auth_url": mock_auth_url,
                 "state": state_encoded,
@@ -104,9 +109,11 @@ class GoogleOAuthService:
         Saves tokens securely in the database.
         """
         user_id = "default_doctor"
+        return_url = None
         try:
             state_data = json.loads(urllib.parse.unquote(state))
             user_id = state_data.get("uid", "default_doctor")
+            return_url = state_data.get("return_url")
         except Exception:
             logger.warning(f"Could not parse state: {state}")
 
@@ -118,13 +125,14 @@ class GoogleOAuthService:
                 email="doctor@medibridge.ai",
                 access_token="mock_meet_access_token_" + secrets.token_hex(16),
                 refresh_token="mock_meet_refresh_token_" + secrets.token_hex(16),
-                expires_in=3600,
+                expires_in=86400 * 30,
                 scopes=" ".join(REQUIRED_SCOPES),
             )
             return {
                 "success": True,
                 "user_id": user_id,
                 "email": mock_token.email,
+                "return_url": return_url,
                 "is_mock": True,
             }
 
@@ -176,6 +184,7 @@ class GoogleOAuthService:
                 "success": True,
                 "user_id": user_id,
                 "email": token_rec.email,
+                "return_url": return_url,
                 "is_mock": False,
             }
 
@@ -202,14 +211,14 @@ class GoogleOAuthService:
                     email="doctor@medibridge.ai",
                     access_token="mock_meet_access_token_" + secrets.token_hex(16),
                     refresh_token="mock_meet_refresh_token_" + secrets.token_hex(16),
-                    expires_in=86400,
+                    expires_in=86400 * 30,
                     scopes=" ".join(REQUIRED_SCOPES),
                 )
                 return token_rec.access_token
             return None
 
-        # Check if token is mock
-        if token_rec.access_token.startswith("mock_"):
+        # Check if token is mock or custom
+        if token_rec.access_token and token_rec.access_token.startswith(("mock_", "custom_")):
             return token_rec.access_token
 
         # Check expiration (with a 5-minute safety buffer)

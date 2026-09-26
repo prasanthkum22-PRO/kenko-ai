@@ -76,6 +76,15 @@ export default function GoogleMeetCard({
   useEffect(() => {
     let active = true;
     async function checkAuth() {
+      const params = new URLSearchParams(window.location.search);
+      const googleAuthParam = params.get('google_auth');
+      const googleAuthEmail = params.get('email');
+      if (googleAuthParam === 'success' && active) {
+        success(`Google Meet account connected (${googleAuthEmail || 'authorized'})`, 'OAuth Connected');
+      } else if (googleAuthParam === 'error' && active) {
+        toastError('Google authorization was cancelled or denied.', 'OAuth Error');
+      }
+
       const cachedEmail = localStorage.getItem('kenko_doctor_google_email');
       if (cachedEmail && active) {
         setCustomGoogleEmail(cachedEmail);
@@ -126,35 +135,17 @@ export default function GoogleMeetCard({
   }, [consultation]);
 
   const handleConnectGoogle = async () => {
-    const targetEmail = customGoogleEmail.trim() || localStorage.getItem('kenko_doctor_google_email') || 'prasanthanith5@gmail.com';
     try {
       setLoading(true);
-      const res = await getGoogleAuthUrl().catch(() => null);
-      if (res?.auth_url && res.is_configured && res.auth_url.startsWith('https://accounts.google.com')) {
+      const currentUrl = window.location.href;
+      const res = await getGoogleAuthUrl(currentUrl).catch(() => null);
+      if (res?.auth_url) {
         window.location.href = res.auth_url;
         return;
       }
-      
-      // Standalone / Instant connection mode
-      localStorage.setItem('kenko_doctor_google_email', targetEmail);
-      setAuthStatus({
-        is_connected: true,
-        email: targetEmail,
-        is_mock: false,
-        checked: true,
-      });
-      setIsEditingGoogleAccount(false);
-      success(`Google Meet account connected (${targetEmail})`, 'OAuth Connected');
+      toastError('Could not initialize Google authentication. Please try again.', 'OAuth Error');
     } catch {
-      localStorage.setItem('kenko_doctor_google_email', targetEmail);
-      setAuthStatus({
-        is_connected: true,
-        email: targetEmail,
-        is_mock: false,
-        checked: true,
-      });
-      setIsEditingGoogleAccount(false);
-      success(`Google Meet account connected (${targetEmail})`, 'Connected');
+      toastError('Could not connect to Google. Please check your network connection.', 'OAuth Error');
     } finally {
       setLoading(false);
     }
@@ -223,6 +214,10 @@ export default function GoogleMeetCard({
             spaceName = res.spaceName || res.meeting?.spaceName || null;
           }
         } catch (err) {
+          const detailMsg = err?.response?.data?.message || err?.response?.data?.detail?.message || err?.response?.data?.detail;
+          if (detailMsg && typeof detailMsg === 'string') {
+            setMeetCreationError(detailMsg);
+          }
           console.debug('createAppointmentMeet note:', err);
         }
       }
@@ -237,6 +232,10 @@ export default function GoogleMeetCard({
             spaceName = res.spaceName || null;
           }
         } catch (err) {
+          const detailMsg = err?.response?.data?.message || err?.response?.data?.detail?.message || err?.response?.data?.detail;
+          if (detailMsg && typeof detailMsg === 'string') {
+            setMeetCreationError(detailMsg);
+          }
           console.debug('createGoogleMeet note:', err);
         }
       }
@@ -251,9 +250,9 @@ export default function GoogleMeetCard({
       }
 
       if (!meetUri) {
-        setMeetCreationError('Unable to prepare Google Meet space. Please check backend OAuth configuration and retry.');
+        setMeetCreationError((prev) => prev || 'Unable to prepare Google Meet space. Please connect your Google account or check backend OAuth settings.');
         setMeetData((prev) => ({ ...prev, meetingStatus: 'meet_creation_failed' }));
-        toastError('Failed to create Google Meet space. Please retry.', 'Creation Error');
+        toastError('Failed to create Google Meet space. Please connect your Google account or retry.', 'Creation Error');
         return;
       }
 
@@ -527,19 +526,34 @@ export default function GoogleMeetCard({
                 <span>Unable to prepare the meeting.</span>
               </div>
               <p className="text-xs text-muted">
-                {meetCreationError || 'We could not connect to Google Meet. Please try again.'}
+                {meetCreationError || 'We could not connect to Google Meet. Please connect your Google account or retry.'}
               </p>
-              <button
-                id="retry-google-meet-btn"
-                type="button"
-                className="btn btn-primary flex items-center justify-center gap-2 px-6"
-                style={{ minHeight: '44px' }}
-                onClick={handleCreateMeet}
-                disabled={loading}
-              >
-                <IconRefresh size={16} />
-                <span>Try Again</span>
-              </button>
+              <div className="flex items-center gap-2 flex-wrap justify-center">
+                {isDoctor && (
+                  <button
+                    id="connect-google-oauth-btn"
+                    type="button"
+                    className="btn btn-secondary flex items-center justify-center gap-2 px-4"
+                    style={{ minHeight: '44px' }}
+                    onClick={handleConnectGoogle}
+                    disabled={loading}
+                  >
+                    <IconGoogle size={16} />
+                    <span>Connect Google Account</span>
+                  </button>
+                )}
+                <button
+                  id="retry-google-meet-btn"
+                  type="button"
+                  className="btn btn-primary flex items-center justify-center gap-2 px-6"
+                  style={{ minHeight: '44px' }}
+                  onClick={handleCreateMeet}
+                  disabled={loading}
+                >
+                  <IconRefresh size={16} />
+                  <span>Try Again</span>
+                </button>
+              </div>
             </div>
           )}
 

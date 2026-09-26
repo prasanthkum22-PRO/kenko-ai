@@ -184,8 +184,9 @@ export const askConsultationChat = async (id, question) => {
 
 // ─── Google Meet & OAuth API ──────────────────────────────────
 
-export const getGoogleAuthUrl = async () => {
-  const res = await api.get('/api/google/auth');
+export const getGoogleAuthUrl = async (returnUrl = null) => {
+  const params = returnUrl ? { return_url: returnUrl } : {};
+  const res = await api.get('/api/google/auth', { params });
   return res.data;
 };
 

@@ -293,6 +293,13 @@ export default function VideoConsultationPage() {
   }, [loadData]);
 
   useEffect(() => {
+    const authParam = searchParams.get('google_auth');
+    if (authParam === 'success') {
+      success('Google account connected successfully.', 'OAuth Connected');
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     if (timerActive) {
       timerRef.current = setInterval(() => setElapsedSeconds((prev) => prev + 1), 1000);
     } else {
