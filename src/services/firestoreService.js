@@ -262,13 +262,14 @@ export const createAppointmentFirestore = async (patientId, appointmentData) => 
   const payload = {
     id: aptRef.id,
     patientId,
-    doctorId: appointmentData.doctorId,
-    patientName: appointmentData.patientName,
-    doctorName: appointmentData.doctorName,
+    doctorId: appointmentData.doctorId || 'dr_default_01',
+    patientName: appointmentData.patientName || 'Patient',
+    doctorName: appointmentData.doctorName || 'Dr. Aarav Patel',
+    doctorSpecialization: appointmentData.doctorSpecialization || 'General Medicine',
     reason: appointmentData.reason || 'General Consultation',
-    consultationType: appointmentData.consultationType || 'video',
+    consultationType: appointmentData.consultationType || appointmentData.appointment_type || 'video',
     status: 'SCHEDULED',
-    scheduledStart: appointmentData.scheduledStart || serverTimestamp(),
+    scheduledStart: appointmentData.scheduledStart || appointmentData.scheduled_at || serverTimestamp(),
     scheduledEnd: appointmentData.scheduledEnd || null,
     googleSpaceName: appointmentData.googleSpaceName || '',
     googleMeetingUri: appointmentData.googleMeetingUri || '',
@@ -280,17 +281,117 @@ export const createAppointmentFirestore = async (patientId, appointmentData) => 
   return payload;
 };
 
-export const listUserAppointmentsFirestore = async (userId, role = 'patient') => {
-  const field = role.toLowerCase() === 'doctor' ? 'doctorId' : 'patientId';
-  const q = query(
-    collection(db, 'appointments'),
-    where(field, '==', userId),
-    orderBy('scheduledStart', 'asc'),
-    limit(50)
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+export const getAppointmentFirestore = async (appointmentId) => {
+  if (!appointmentId) return null;
+  const snap = await getDoc(doc(db, 'appointments', appointmentId));
+  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 };
+
+export const updateAppointmentFirestore = async (appointmentId, updates) => {
+  const aptRef = doc(db, 'appointments', appointmentId);
+  await updateDoc(aptRef, {
+    ...updates,
+    updatedAt: serverTimestamp(),
+  });
+};
+
+export const cancelAppointmentFirestore = async (appointmentId, reason = 'Cancelled by user') => {
+  const aptRef = doc(db, 'appointments', appointmentId);
+  await updateDoc(aptRef, {
+    status: 'CANCELLED',
+    cancelReason: reason,
+    updatedAt: serverTimestamp(),
+  });
+};
+
+export const listUserAppointmentsFirestore = async (userId, role = 'patient') => {
+  try {
+    const field = role?.toLowerCase() === 'doctor' ? 'doctorId' : 'patientId';
+    const q = query(
+      collection(db, 'appointments'),
+      where(field, '==', userId),
+      orderBy('createdAt', 'desc'),
+      limit(50)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    console.warn('listUserAppointmentsFirestore fallback:', err?.message);
+    try {
+      const snap = await getDocs(collection(db, 'appointments'));
+      return snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((a) => (role?.toLowerCase() === 'doctor' ? a.doctorId === userId : a.patientId === userId));
+    } catch {
+      return [];
+    }
+  }
+};
+
+export const listAllAppointmentsFirestore = async () => {
+  try {
+    const snap = await getDocs(query(collection(db, 'appointments'), orderBy('createdAt', 'desc'), limit(100)));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    console.warn('listAllAppointmentsFirestore error:', err?.message);
+    return [];
+  }
+};
+
+export const listenToUserAppointmentsFirestore = (userId, role, onUpdate) => {
+  if (!userId) return () => {};
+  const isDoctor = role?.toLowerCase() === 'doctor';
+  const isAdmin = role?.toLowerCase() === 'admin';
+
+  let q;
+  if (isAdmin) {
+    q = query(collection(db, 'appointments'), limit(100));
+  } else {
+    const field = isDoctor ? 'doctorId' : 'patientId';
+    q = query(collection(db, 'appointments'), where(field, '==', userId), limit(50));
+  }
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      onUpdate(list);
+    },
+    (err) => {
+      console.warn('Appointments snapshot listener error:', err?.message);
+    }
+  );
+};
+
+export const getVerifiedDoctorsFirestore = async () => {
+  try {
+    const q = query(collection(db, 'doctorProfiles'), limit(50));
+    const snap = await getDocs(q);
+    const doctors = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (doctors.length > 0) return doctors;
+  } catch (err) {
+    console.warn('getVerifiedDoctorsFirestore profiles error:', err?.message);
+  }
+  try {
+    const q = query(collection(db, 'users'), where('role', 'in', ['DOCTOR', 'doctor']), limit(50));
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({
+      id: d.id,
+      doctorId: d.id,
+      fullName: d.data().displayName || d.data().name || 'Dr. Specialist',
+      specialization: d.data().specialization || 'General Medicine',
+      email: d.data().email,
+    }));
+  } catch {
+    return [
+      { id: 'dr_aarav', fullName: 'Dr. Aarav Patel', specialization: 'General Medicine', email: 'dr.aarav@kenko.ai' },
+      { id: 'dr_ananya', fullName: 'Dr. Ananya Sharma', specialization: 'Cardiology', email: 'dr.ananya@kenko.ai' },
+      { id: 'dr_sarah', fullName: 'Dr. Sarah Jenkins', specialization: 'Neurology', email: 'dr.sarah@kenko.ai' },
+      { id: 'dr_prasanth', fullName: 'Dr. Prasanth Kumar', specialization: 'Internal Medicine', email: 'prasanthanith5@gmail.com' },
+    ];
+  }
+};
+
 
 // ─── 6. CONSULTATIONS & TRANSCRIPT SUBCOLLECTION ─────────────────────────────
 

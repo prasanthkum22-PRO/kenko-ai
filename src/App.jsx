@@ -20,6 +20,7 @@ const ConsultationWorkspacePage = lazy(() => import('./pages/ConsultationWorkspa
 const PrescriptionStudioPage = lazy(() => import('./pages/PrescriptionStudioPage'));
 const OCRPage = lazy(() => import('./pages/OCRPage'));
 const FollowUpHubPage = lazy(() => import('./pages/FollowUpHubPage'));
+const AppointmentsPage = lazy(() => import('./pages/AppointmentsPage'));
 
 const AdminWorkspace = lazy(() => import('./pages/admin/AdminWorkspace'));
 const DoctorWorkspace = lazy(() => import('./pages/doctor/DoctorWorkspace'));
@@ -176,6 +177,9 @@ export default function App() {
 
                     {/* Shared clinical workflows */}
                     <Route path="/dashboard" element={<RoleHomeRedirect />} />
+                    <Route path="/appointments" element={<AppointmentsPage />} />
+                    <Route path="/appointments/book" element={<AppointmentsPage />} />
+                    <Route path="/appointments/:id" element={<AppointmentsPage />} />
                     <Route path="/consultations" element={<ConsultationsHubPage />} />
                     <Route path="/consultations/video" element={<VideoConsultationPage />} />
                     <Route path="/consultations/in-person" element={<InPersonConsultationPage />} />

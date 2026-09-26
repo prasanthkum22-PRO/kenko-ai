@@ -14,19 +14,49 @@ POST /api/appointments/:id/meet
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, List
+from pydantic import BaseModel
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.models.db_models import Appointment, Consultation, User, AuditLog, TranscriptSegment
+from app.models.db_models import Appointment, Consultation, User, AuditLog, Notification
 from app.utils.auth import get_current_user, require_authenticated_user
 from app.services.google_meet_service import google_meet_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/appointments", tags=["Appointments"])
+
+
+class AppointmentCreateSchema(BaseModel):
+    doctor_id: Optional[str] = None
+    doctor_name: Optional[str] = "Dr. Aarav Patel"
+    doctor_specialization: Optional[str] = "General Medicine"
+    patient_id: Optional[str] = None
+    patient_name: Optional[str] = None
+    patient_age: Optional[int] = None
+    patient_gender: Optional[str] = None
+    patient_language: Optional[str] = "English"
+    appointment_type: Optional[str] = "video"
+    scheduled_at: Optional[str] = None
+    scheduled_end: Optional[str] = None
+    reason: Optional[str] = "General Consultation"
+    notes: Optional[str] = None
+
+
+class AppointmentUpdateSchema(BaseModel):
+    scheduled_at: Optional[str] = None
+    scheduled_end: Optional[str] = None
+    reason: Optional[str] = None
+    status: Optional[str] = None
+    appointment_type: Optional[str] = None
+
+
+class AppointmentCancelSchema(BaseModel):
+    reason: Optional[str] = "Cancelled by user"
+
 
 
 # ─── Authorization helper ─────────────────────────────────────────────────────
@@ -156,6 +186,209 @@ def _build_appointment_response(
         "doctor": doctor_block,
         "consultation": consult_block,
         "googleMeet": meet_block,
+    }
+
+
+# ─── GET /api/appointments ───────────────────────────────────────────────────
+
+@router.get("", summary="List appointments with role-based filtering")
+def list_appointments(
+    status_filter: Optional[str] = Query(None, alias="status"),
+    type_filter: Optional[str] = Query(None, alias="type"),
+    patient_id: Optional[str] = Query(None),
+    doctor_id: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(require_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Returns a list of appointments for the current user.
+    - Patient: only appointments where patient_id == current_user.id
+    - Doctor: only appointments where doctor_id == current_user.id
+    - Admin/Nurse/Lab: full view with optional filters
+    """
+    query = db.query(Appointment)
+    role = (current_user.role or "").upper()
+    uid = current_user.id
+
+    if role == "PATIENT":
+        query = query.filter((Appointment.patient_id == uid) | (Appointment.patient_id == (current_user.patient_id or uid)))
+    elif role in ("DOCTOR", "DOCTOR_PENDING"):
+        query = query.filter((Appointment.doctor_id == uid) | (Appointment.doctor_id == (current_user.doctor_id or uid)))
+    else:
+        # Admin / Staff filtering
+        if patient_id:
+            query = query.filter(Appointment.patient_id == patient_id)
+        if doctor_id:
+            query = query.filter(Appointment.doctor_id == doctor_id)
+
+    if status_filter and status_filter.lower() != "all":
+        query = query.filter(Appointment.status.ilike(f"%{status_filter}%"))
+    if type_filter and type_filter.lower() != "all":
+        query = query.filter(Appointment.appointment_type.ilike(f"%{type_filter}%"))
+
+    appointments = query.order_by(Appointment.scheduled_at.desc()).limit(limit).all()
+
+    items = []
+    for appt in appointments:
+        consult = None
+        if appt.consultation_id:
+            consult = db.query(Consultation).filter(Consultation.id == appt.consultation_id).first()
+        items.append(_build_appointment_response(appt, consult, current_user))
+
+    return {
+        "success": True,
+        "count": len(items),
+        "appointments": items,
+    }
+
+
+# ─── POST /api/appointments & /api/appointments/book ──────────────────────────
+
+@router.post("", summary="Book/Create a new appointment")
+@router.post("/book", summary="Book a new appointment (alias)")
+def create_appointment(
+    payload: AppointmentCreateSchema,
+    current_user: User = Depends(require_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Book a new appointment (Telehealth Video or In-Person Clinic Visit).
+    Automatically maps patient/doctor and establishes clean initial status.
+    """
+    role = (current_user.role or "").upper()
+    uid = current_user.id
+
+    # Resolve patient info
+    if role == "PATIENT":
+        pat_id = uid
+        pat_name = payload.patient_name or current_user.full_name
+    else:
+        pat_id = payload.patient_id or uid
+        pat_name = payload.patient_name or "Patient"
+
+    # Parse scheduled_at
+    sched_time = datetime.now(timezone.utc)
+    if payload.scheduled_at:
+        try:
+            sched_time = datetime.fromisoformat(payload.scheduled_at.replace("Z", "+00:00"))
+        except Exception:
+            try:
+                sched_time = datetime.strptime(payload.scheduled_at, "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                sched_time = datetime.now(timezone.utc)
+
+    # Doctor resolution
+    doc_id = payload.doctor_id or (uid if role in ("DOCTOR", "DOCTOR_PENDING") else "dr_default_01")
+    doc_name = payload.doctor_name or "Dr. Aarav Patel"
+    doc_spec = payload.doctor_specialization or "General Medicine"
+
+    # If doctor_id exists in User table, retrieve authoritative name
+    doc_user = db.query(User).filter(User.id == doc_id).first()
+    if doc_user:
+        doc_name = doc_user.full_name or doc_name
+
+    appt = Appointment(
+        id=str(uuid.uuid4()),
+        patient_id=pat_id,
+        patient_name=pat_name,
+        patient_age=payload.patient_age,
+        patient_gender=payload.patient_gender,
+        patient_language=payload.patient_language or "English",
+        doctor_id=doc_id,
+        doctor_name=doc_name,
+        doctor_specialization=doc_spec,
+        appointment_type=payload.appointment_type or "video",
+        scheduled_at=sched_time,
+        reason=payload.reason or "General Consultation",
+        status="scheduled",
+        meet_status="SCHEDULED" if (payload.appointment_type or "video") == "video" else "NOT_APPLICABLE",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    db.add(appt)
+    db.commit()
+    db.refresh(appt)
+
+    # Add notification for patient/doctor
+    try:
+        notif = Notification(
+            patient_id=pat_id,
+            title="Appointment Scheduled",
+            message=f"Appointment with {doc_name} scheduled for {sched_time.strftime('%b %d, %Y at %I:%M %p')}.",
+            notification_type="reminder",
+        )
+        db.add(notif)
+        db.commit()
+    except Exception:
+        pass
+
+    return _build_appointment_response(appt, None, current_user)
+
+
+# ─── PUT /api/appointments/:id ───────────────────────────────────────────────
+
+@router.put("/{appointment_id}", summary="Update / Reschedule appointment")
+def update_appointment(
+    appointment_id: str,
+    payload: AppointmentUpdateSchema,
+    current_user: User = Depends(require_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    appointment = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+    if not appointment:
+        raise HTTPException(status_code=404, detail={"success": False, "error": "APPOINTMENT_NOT_FOUND"})
+
+    _require_appointment_access(appointment, current_user)
+
+    if payload.scheduled_at:
+        try:
+            appointment.scheduled_at = datetime.fromisoformat(payload.scheduled_at.replace("Z", "+00:00"))
+        except Exception:
+            pass
+    if payload.reason is not None:
+        appointment.reason = payload.reason
+    if payload.status is not None:
+        appointment.status = payload.status
+    if payload.appointment_type is not None:
+        appointment.appointment_type = payload.appointment_type
+
+    appointment.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(appointment)
+
+    consultation = None
+    if appointment.consultation_id:
+        consultation = db.query(Consultation).filter(Consultation.id == appointment.consultation_id).first()
+
+    return _build_appointment_response(appointment, consultation, current_user)
+
+
+# ─── POST /api/appointments/:id/cancel ───────────────────────────────────────
+
+@router.post("/{appointment_id}/cancel", summary="Cancel an appointment")
+def cancel_appointment(
+    appointment_id: str,
+    payload: AppointmentCancelSchema = None,
+    current_user: User = Depends(require_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    appointment = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+    if not appointment:
+        raise HTTPException(status_code=404, detail={"success": False, "error": "APPOINTMENT_NOT_FOUND"})
+
+    _require_appointment_access(appointment, current_user)
+
+    appointment.status = "cancelled"
+    appointment.meet_status = "CANCELLED"
+    appointment.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "Appointment cancelled successfully.",
+        "appointmentId": appointment_id,
+        "status": "cancelled",
     }
 
 

@@ -40,6 +40,7 @@ const NAV = {
     {
       label: 'Clinical Workflows',
       items: [
+        { id: 'admin-appointments', label: 'Appointments Schedule', to: '/appointments', icon: IconCalendar },
         { id: 'admin-consults', label: 'All Consultations', to: '/consultations', icon: IconDoc },
         { id: 'admin-telehealth', label: 'Telehealth', to: '/consultations/video', icon: IconVideo },
         { id: 'admin-prescriptions', label: 'Prescriptions', to: '/prescriptions', icon: IconRx },
@@ -53,6 +54,7 @@ const NAV = {
       label: 'Clinical Workspace',
       items: [
         { id: 'doc-overview', label: 'Doctor Overview', to: '/doctor', icon: IconDashboard, end: true },
+        { id: 'doc-appointments', label: 'Appointments Schedule', to: '/appointments', icon: IconCalendar },
         { id: 'doc-consults', label: 'Consultation Reviews', to: '/consultations', icon: IconDoc },
         { id: 'doc-followups', label: 'Follow-Up Alerts & Plans', to: '/doctor/follow-up', icon: IconClock },
         { id: 'doc-notifs', label: 'Notifications', to: '/notifications', icon: IconBell },
@@ -88,10 +90,10 @@ const NAV = {
       label: 'My Care Journey',
       items: [
         { id: 'pat-overview', label: 'Dashboard', to: '/patient', icon: IconHome, end: true },
+        { id: 'pat-appointments-sched', label: 'Care Schedule', to: '/patient/calendar', icon: IconCalendar },
         { id: 'pat-journey', label: 'Care Journey', to: '/patient/care-journey', icon: IconActivity },
         { id: 'pat-meds', label: 'Medication Tracker', to: '/patient/medications', icon: IconPill },
         { id: 'pat-followup', label: 'Follow-Up & Check-In', to: '/patient/follow-up', icon: IconClock },
-        { id: 'pat-calendar', label: 'Care Schedule', to: '/patient/calendar', icon: IconCalendar },
         { id: 'pat-docs', label: 'Document Center', to: '/patient/documents', icon: IconDoc },
         { id: 'pat-activity', label: 'Health Activity', to: '/patient/activity', icon: IconActivity },
         { id: 'pat-summary', label: 'Health Summary', to: '/patient/health-summary', icon: IconShield },
@@ -100,6 +102,7 @@ const NAV = {
     {
       label: 'Care Services',
       items: [
+        { id: 'pat-appointments', label: 'Book & Appointments', to: '/appointments', icon: IconCalendar },
         { id: 'pat-video', label: 'Telehealth Video', to: '/consultations/video', icon: IconVideo },
         { id: 'pat-doctors', label: 'Find Doctors', to: '/doctors', icon: IconUsers },
         { id: 'pat-posts', label: 'Health Posts', to: '/posts', icon: IconDoc },

@@ -91,6 +91,21 @@ export const getAppointments = async (params = {}) => {
   return res.data;
 };
 
+export const bookAppointment = async (appointmentData) => {
+  const res = await api.post('/api/appointments', appointmentData);
+  return res.data;
+};
+
+export const updateAppointment = async (appointmentId, updates) => {
+  const res = await api.put(`/api/appointments/${appointmentId}`, updates);
+  return res.data;
+};
+
+export const cancelAppointment = async (appointmentId, reason = 'Cancelled by user') => {
+  const res = await api.post(`/api/appointments/${appointmentId}/cancel`, { reason });
+  return res.data;
+};
+
 export const createAppointmentMeet = async (appointmentId) => {
   const res = await api.post(`/api/appointments/${appointmentId}/meet`);
   return res.data;
