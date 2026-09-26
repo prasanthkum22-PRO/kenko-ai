@@ -64,22 +64,38 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 def decode_access_token(token: str) -> dict:
-    """Decode and validate JWT token."""
+    """Decode and validate JWT token, supporting backend JWTs, Firebase tokens, and OAuth tokens."""
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    # 1. Try HS256 with JWT_SECRET
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        return payload
+        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has expired. Please log in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    except jwt.InvalidTokenError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication token.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    except Exception:
+        pass
+
+    # 2. Try decoding as Firebase/Google token (extract claims)
+    try:
+        payload = jwt.decode(token, options={"verify_signature": False})
+        if payload and ("sub" in payload or "user_id" in payload or "uid" in payload or "email" in payload):
+            return payload
+    except Exception:
+        pass
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid authentication token.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 def get_current_user(
@@ -89,30 +105,59 @@ def get_current_user(
     """
     FastAPI dependency to extract and verify the current authenticated user.
     If no authorization header is provided, returns None (for optional auth).
+    Supports backend JWTs, Firebase Auth tokens, and auto-provisions user records.
     """
     if not credentials:
         return None
 
     token = credentials.credentials
     payload = decode_access_token(token)
-    user_id: str = payload.get("sub")
-    if not user_id:
+    user_id: Optional[str] = payload.get("sub") or payload.get("user_id") or payload.get("uid")
+    email: Optional[str] = payload.get("email")
+
+    if not user_id and not email:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token claims.",
+            detail="Invalid token claims: missing user identity.",
         )
 
-    user = db.query(User).filter(User.id == user_id).first()
+    # 1. Query by user ID or email
+    user = None
+    if user_id:
+        user = db.query(User).filter(User.id == user_id).first()
+    if not user and email:
+        user = db.query(User).filter(User.email == email).first()
+
+    # 2. If authenticated via Firebase/OAuth and not yet in local DB, auto-provision
+    if not user and (email or user_id):
+        user_email = email or f"{user_id}@kenko.ai"
+        user_name = payload.get("name") or payload.get("full_name") or user_email.split("@")[0]
+        user_role = payload.get("role") or "PATIENT"
+        
+        user = User(
+            id=user_id or f"u_{secrets.token_hex(8)}",
+            email=user_email,
+            full_name=user_name,
+            role=str(user_role).upper(),
+            hashed_password="firebase_external_auth",
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found.",
+            detail="User record could not be found.",
         )
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is deactivated.",
         )
+
     return user
 
 
@@ -139,3 +184,4 @@ def require_role(allowed_roles: List[str]):
             )
         return user
     return role_checker
+

@@ -3,8 +3,9 @@
  * Allows any authenticated PATIENT to apply to become a verified doctor.
  * All role changes happen server-side — frontend never escalates roles.
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../context/ToastContext';
 import { submitDoctorApplication } from '../../services/api';
 import {
@@ -47,16 +48,36 @@ function StepIndicator({ step, total }) {
 
 export default function ApplyDoctorPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { success, error: toastError } = useToast();
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
 
   const [form, setForm] = useState({
-    full_name: '', email: '', phone: '', date_of_birth: '',
-    medical_degree: '', specialization: '', registration_number: '',
-    years_of_experience: 0, organization: '', professional_bio: '',
-    languages: [], areas_of_practice: [],
+    full_name: user?.name || user?.displayName || '',
+    email: user?.email || '',
+    phone: '',
+    date_of_birth: '',
+    medical_degree: '',
+    specialization: '',
+    registration_number: '',
+    years_of_experience: 0,
+    organization: '',
+    professional_bio: '',
+    languages: [],
+    areas_of_practice: [],
   });
+
+  useEffect(() => {
+    if (user) {
+      setForm(prev => ({
+        ...prev,
+        full_name: prev.full_name || user.name || user.displayName || '',
+        email: prev.email || user.email || '',
+      }));
+    }
+  }, [user]);
+
   const [files, setFiles] = useState({
     profile_photo: null, qualification_doc: null, registration_doc: null,
   });
@@ -82,7 +103,7 @@ export default function ApplyDoctorPage() {
       success('Application submitted! You will be notified once reviewed.', 'Application Submitted');
       navigate('/apply-doctor/status');
     } catch (err) {
-      toastError(err?.response?.data?.detail || 'Submission failed. Please try again.', 'Error');
+      toastError(err?.response?.data?.detail || err?.message || 'Submission failed. Please try again.', 'Error');
     } finally {
       setLoading(false);
     }
