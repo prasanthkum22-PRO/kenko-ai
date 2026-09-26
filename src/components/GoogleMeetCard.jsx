@@ -138,14 +138,16 @@ export default function GoogleMeetCard({
     try {
       setLoading(true);
       const currentUrl = window.location.href;
-      const res = await getGoogleAuthUrl(currentUrl).catch(() => null);
+      const res = await getGoogleAuthUrl(currentUrl);
       if (res?.auth_url) {
         window.location.href = res.auth_url;
         return;
       }
       toastError('Could not initialize Google authentication. Please try again.', 'OAuth Error');
-    } catch {
-      toastError('Could not connect to Google. Please check your network connection.', 'OAuth Error');
+    } catch (err) {
+      console.error('Google OAuth URL error:', err);
+      const msg = err?.response?.data?.message || err?.response?.data?.detail || err?.message || 'Could not connect to Google. Please check your network connection.';
+      toastError(msg, 'OAuth Error');
     } finally {
       setLoading(false);
     }
