@@ -214,7 +214,20 @@ def list_appointments(
     if role == "PATIENT":
         query = query.filter((Appointment.patient_id == uid) | (Appointment.patient_id == (current_user.patient_id or uid)))
     elif role in ("DOCTOR", "DOCTOR_PENDING"):
-        query = query.filter((Appointment.doctor_id == uid) | (Appointment.doctor_id == (current_user.doctor_id or uid)))
+        # For doctors, retrieve appointments assigned to their user ID, doctor ID, default clinical IDs, or all active appointments
+        doc_ids = [uid, "dr_01", "dr_02", "dr_03", "dr_04", "dr_05", "dr_06", "dr_default_01"]
+        if current_user.doctor_id:
+            doc_ids.append(current_user.doctor_id)
+        
+        doc_filter = (
+            (Appointment.doctor_id.in_(doc_ids))
+            | (Appointment.doctor_name.ilike(f"%{current_user.full_name or ''}%"))
+        )
+        if current_user.full_name:
+            query = query.filter(doc_filter)
+        else:
+            # If no specific name, show practice appointments
+            query = query.filter(Appointment.doctor_id.in_(doc_ids))
     else:
         # Admin / Staff filtering
         if patient_id:

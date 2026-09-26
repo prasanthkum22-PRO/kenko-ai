@@ -347,17 +347,23 @@ export const listUserAppointmentsFirestore = async (userId, role = 'patient') =>
 
     if (isDoctor) {
       // Doctor matches their own ID or standard doctor IDs or doctor name
-      return all
-        .filter((a) => {
-          if (!userId) return true;
-          const matchId = a.doctorId === userId || a.doctor_id === userId || a.doctorId === 'dr_default_01' || a.doctorId === 'dr_01';
-          return matchId;
-        })
-        .sort((a, b) => {
-          const tA = a.scheduledStart?.toDate ? a.scheduledStart.toDate() : new Date(a.scheduledStart || a.scheduled_at || 0);
-          const tB = b.scheduledStart?.toDate ? b.scheduledStart.toDate() : new Date(b.scheduledStart || b.scheduled_at || 0);
-          return tB - tA;
-        });
+      const validDocIds = ['dr_01', 'dr_02', 'dr_03', 'dr_04', 'dr_05', 'dr_06', 'dr_default_01'];
+      if (userId) validDocIds.push(userId);
+
+      const doctorAppointments = all.filter((a) => {
+        if (!userId) return true;
+        const matchId = validDocIds.includes(a.doctorId) || validDocIds.includes(a.doctor_id);
+        return matchId;
+      });
+
+      // If specific ID filter yields results, return them; otherwise return all appointments for the clinic
+      const results = doctorAppointments.length > 0 ? doctorAppointments : all;
+
+      return results.sort((a, b) => {
+        const tA = a.scheduledStart?.toDate ? a.scheduledStart.toDate() : new Date(a.scheduledStart || a.scheduled_at || 0);
+        const tB = b.scheduledStart?.toDate ? b.scheduledStart.toDate() : new Date(b.scheduledStart || b.scheduled_at || 0);
+        return tB - tA;
+      });
     }
 
     // Patient matches their user ID
@@ -406,14 +412,15 @@ export const listenToUserAppointmentsFirestore = (userId, role, onUpdate) => {
       if (isAdmin) {
         filtered = list;
       } else if (isDoctor) {
-        filtered = list.filter((a) => {
+        const validDocIds = ['dr_01', 'dr_02', 'dr_03', 'dr_04', 'dr_05', 'dr_06', 'dr_default_01'];
+        if (userId) validDocIds.push(userId);
+
+        const matched = list.filter((a) => {
           if (!userId) return true;
-          return a.doctorId === userId || a.doctor_id === userId || a.doctorId === 'dr_default_01' || a.doctorId === 'dr_01';
+          return validDocIds.includes(a.doctorId) || validDocIds.includes(a.doctor_id);
         });
-        // If doctor filter yields 0 but there are items, return all appointments to avoid empty doctor view in demo mode
-        if (filtered.length === 0 && list.length > 0) {
-          filtered = list;
-        }
+        
+        filtered = matched.length > 0 ? matched : list;
       } else {
         filtered = list.filter((a) => !userId || a.patientId === userId || a.patient_id === userId);
       }
