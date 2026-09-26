@@ -328,15 +328,16 @@ export const acceptAppointmentFirestore = async (appointmentId, customMeetUri = 
   const currentData = snap.exists() ? snap.data() : {};
 
   const isVideo = (currentData.consultationType || currentData.appointment_type || 'video').toLowerCase() === 'video';
-  const meetingCode = isVideo ? `kenko-${appointmentId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3)}-${appointmentId.replace(/[^a-zA-Z0-9]/g, '').slice(3, 7)}-${appointmentId.replace(/[^a-zA-Z0-9]/g, '').slice(7, 10) || 'med'}` : '';
-  const meetingUri = customMeetUri || currentData.googleMeetingUri || (isVideo ? `https://meet.google.com/${meetingCode}` : '');
+  // Use real Google Meet instant room or custom URI
+  const meetingUri = customMeetUri || currentData.googleMeetingUri || (isVideo ? 'https://meet.google.com/new' : '');
+  const meetingCode = isVideo ? 'instant-meet' : '';
 
   const updates = {
     status: 'CONFIRMED',
     meetStatus: isVideo ? 'READY' : 'NOT_APPLICABLE',
     googleMeetingUri: meetingUri,
     googleMeetingCode: meetingCode,
-    googleSpaceName: currentData.googleSpaceName || (isVideo ? `spaces/${meetingCode}` : ''),
+    googleSpaceName: currentData.googleSpaceName || '',
     acceptedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };

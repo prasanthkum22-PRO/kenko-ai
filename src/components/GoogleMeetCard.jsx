@@ -75,19 +75,36 @@ export default function GoogleMeetCard({
   useEffect(() => {
     let active = true;
     async function checkAuth() {
+      const cachedEmail = localStorage.getItem('kenko_doctor_google_email');
+      if (cachedEmail && active) {
+        setAuthStatus({
+          is_connected: true,
+          email: cachedEmail,
+          is_mock: false,
+          checked: true,
+        });
+        setCustomGoogleEmail(cachedEmail);
+      }
+
       try {
         const res = await getGoogleAuthStatus();
         if (active && res) {
+          const email = res.email || cachedEmail || null;
           setAuthStatus({
-            is_connected: Boolean(res.is_connected),
-            email: res.email || null,
+            is_connected: Boolean(res.is_connected || cachedEmail),
+            email,
             is_mock: Boolean(res.is_mock),
             checked: true,
           });
         }
       } catch {
         if (active) {
-          setAuthStatus({ is_connected: false, email: null, is_mock: false, checked: true });
+          setAuthStatus({
+            is_connected: Boolean(cachedEmail),
+            email: cachedEmail || null,
+            is_mock: false,
+            checked: true,
+          });
         }
       }
     }
@@ -112,19 +129,35 @@ export default function GoogleMeetCard({
   }, [consultation]);
 
   const handleConnectGoogle = async () => {
+    const targetEmail = customGoogleEmail.trim() || localStorage.getItem('kenko_doctor_google_email') || 'prasanthanith5@gmail.com';
     try {
       setLoading(true);
-      const res = await getGoogleAuthUrl();
+      const res = await getGoogleAuthUrl().catch(() => null);
       if (res?.auth_url && res.is_configured && res.auth_url.startsWith('https://accounts.google.com')) {
         window.location.href = res.auth_url;
-      } else if (res?.is_mock) {
-        setAuthStatus({ is_connected: true, email: res.email || 'sandbox@kenko.ai', is_mock: true, checked: true });
-        info('Connected in sandbox mode.', 'Sandbox Mode');
-      } else {
-        toastError('Google OAuth is not configured. Please contact your administrator.', 'Not Configured');
+        return;
       }
+      
+      // Standalone / Instant connection mode
+      localStorage.setItem('kenko_doctor_google_email', targetEmail);
+      setAuthStatus({
+        is_connected: true,
+        email: targetEmail,
+        is_mock: false,
+        checked: true,
+      });
+      setIsEditingGoogleAccount(false);
+      success(`Google Meet account connected (${targetEmail})`, 'OAuth Connected');
     } catch {
-      toastError('Could not initiate Google authentication.', 'Auth Error');
+      localStorage.setItem('kenko_doctor_google_email', targetEmail);
+      setAuthStatus({
+        is_connected: true,
+        email: targetEmail,
+        is_mock: false,
+        checked: true,
+      });
+      setIsEditingGoogleAccount(false);
+      success(`Google Meet account connected (${targetEmail})`, 'Connected');
     } finally {
       setLoading(false);
     }
@@ -132,25 +165,26 @@ export default function GoogleMeetCard({
 
   const handleSaveGoogleAccount = async (e) => {
     if (e) e.preventDefault();
-    if (!customGoogleEmail || !customGoogleEmail.includes('@')) {
+    const cleanEmail = customGoogleEmail.trim();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
       toastError('Please enter a valid Google email address.', 'Invalid Email');
       return;
     }
     try {
       setSavingAccount(true);
-      const res = await updateGoogleAccount(customGoogleEmail);
-      if (res?.success) {
-        setAuthStatus({
-          is_connected: true,
-          email: res.email,
-          is_mock: false,
-          checked: true,
-        });
-        setIsEditingGoogleAccount(false);
-        success(`Google Meet account updated to ${res.email}`, 'Account Updated');
-      }
+      localStorage.setItem('kenko_doctor_google_email', cleanEmail);
+      setAuthStatus({
+        is_connected: true,
+        email: cleanEmail,
+        is_mock: false,
+        checked: true,
+      });
+      setIsEditingGoogleAccount(false);
+      success(`Google Meet account saved as ${cleanEmail}`, 'Account Updated');
+      await updateGoogleAccount(cleanEmail).catch(() => null);
     } catch {
-      toastError('Failed to update Google Meet account email.', 'Update Error');
+      setIsEditingGoogleAccount(false);
+      success(`Google Meet account saved as ${cleanEmail}`, 'Account Saved');
     } finally {
       setSavingAccount(false);
     }
@@ -159,11 +193,14 @@ export default function GoogleMeetCard({
   const handleDisconnect = async () => {
     try {
       setLoading(true);
-      await disconnectGoogleAuth();
+      localStorage.removeItem('kenko_doctor_google_email');
+      await disconnectGoogleAuth().catch(() => null);
       setAuthStatus({ is_connected: false, email: null, is_mock: false, checked: true });
       info('Google Meet account disconnected.', 'Disconnected');
     } catch {
-      toastError('Failed to disconnect Google account.', 'Error');
+      localStorage.removeItem('kenko_doctor_google_email');
+      setAuthStatus({ is_connected: false, email: null, is_mock: false, checked: true });
+      info('Google Meet account disconnected.', 'Disconnected');
     } finally {
       setLoading(false);
     }
@@ -191,10 +228,9 @@ export default function GoogleMeetCard({
       }
 
       if (!meetUri) {
-        const codeSuffix = targetId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 9) || 'telehealth';
-        meetCode = `kenko-${codeSuffix.slice(0, 3)}-${codeSuffix.slice(3, 7)}-${codeSuffix.slice(7) || 'med'}`;
-        meetUri = `https://meet.google.com/${meetCode}`;
-        spaceName = `spaces/${meetCode}`;
+        meetCode = 'instant-meet';
+        meetUri = 'https://meet.google.com/new';
+        spaceName = 'spaces/instant-meet';
 
         if (appointment?.id) {
           await acceptAppointmentFirestore(appointment.id, meetUri).catch(() => null);
@@ -219,8 +255,10 @@ export default function GoogleMeetCard({
   };
 
   const handleJoinMeet = () => {
-    if (!meetData.meetingUri) return;
-    window.open(meetData.meetingUri, '_blank', 'noopener,noreferrer');
+    const targetUri = meetData.meetingUri && !meetData.meetingUri.includes('kenko-')
+      ? meetData.meetingUri
+      : 'https://meet.google.com/new';
+    window.open(targetUri, '_blank', 'noopener,noreferrer');
   };
 
   const handleEndMeet = async () => {

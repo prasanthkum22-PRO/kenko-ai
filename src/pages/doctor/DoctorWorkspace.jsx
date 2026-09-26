@@ -501,23 +501,10 @@ export default function DoctorWorkspace() {
                                   <>
                                     <button
                                       className="btn btn-primary btn-sm flex items-center gap-1"
-                                      onClick={() => {
-                                        if (apt.googleMeetingUri) {
-                                          window.open(apt.googleMeetingUri, '_blank');
-                                        } else {
-                                          navigate(`/consultations/video?appointmentId=${apt.id}`);
-                                        }
-                                      }}
-                                      title="Open Google Meet Telehealth Video"
-                                    >
-                                      <IconVideo size={13} /> Join Meet
-                                    </button>
-                                    <button
-                                      className="btn btn-secondary btn-sm flex items-center gap-1"
                                       onClick={() => navigate(`/consultations/video?appointmentId=${apt.id}`)}
-                                      title="Open Telehealth Workspace"
+                                      title="Open Telehealth Video Consultation"
                                     >
-                                      Workspace
+                                      <IconVideo size={13} /> Join Consultation
                                     </button>
                                   </>
                                 ) : (

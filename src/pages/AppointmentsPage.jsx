@@ -511,29 +511,18 @@ export default function AppointmentsPage() {
   };
 
   // Launch Google Meet / Video Consultation Room
-  const handleJoinVideoConsultation = async (apt) => {
+  const handleJoinVideoConsultation = async (apt, forceGoogleMeet = false) => {
     if (apt.appointmentType !== 'video') return;
 
-    // If Google Meeting URI exists, open it directly in a new tab if requested, or telehealth workspace
-    if (apt.googleMeetingUri) {
-      window.open(apt.googleMeetingUri, '_blank', 'noopener,noreferrer');
+    if (forceGoogleMeet) {
+      const meetUrl = apt.googleMeetingUri && !apt.googleMeetingUri.includes('kenko-') 
+        ? apt.googleMeetingUri 
+        : 'https://meet.google.com/new';
+      window.open(meetUrl, '_blank', 'noopener,noreferrer');
       return;
     }
 
-    // If doctor and no Google Meet Space exists yet, create it
-    if ((isDoctor || isAdmin) && (!apt.googleMeetingUri || apt.meetStatus === 'NOT_CREATED')) {
-      try {
-        const meetRes = await createAppointmentMeet(apt.id);
-        if (meetRes?.meetingUri) {
-          window.open(meetRes.meetingUri, '_blank', 'noopener,noreferrer');
-          return;
-        }
-      } catch (err) {
-        console.warn('Meet creation note:', err);
-      }
-    }
-
-    // Direct navigation to Telehealth video consultation
+    // Direct navigation to Telehealth video consultation workspace
     navigate(`/consultations/video?appointmentId=${apt.id}`);
   };
 
