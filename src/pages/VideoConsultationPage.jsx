@@ -1,15 +1,17 @@
 /**
- * VideoConsultationPage — Google Meet Telehealth Consultation
+ * VideoConsultationPage — Clean, Professional Healthcare Telehealth Interface
  *
- * Correct data relationship:
- *   Appointment → Consultation → Google Meet Space → Conference Record → Transcript
+ * Design Architecture:
+ *   TOP: Consultation Header (Compact navigation, title, clean status badge)
+ *   MIDDLE: Patient/Doctor Identity Card & Google Meet Hub Card
+ *   BOTTOM: Consultation Details, Transcript, and Clinical Summary Tabs
  *
- * Rules enforced here:
- *  • NO fake patient names (Eleanor Vance, etc.)
- *  • NO fake doctor names
- *  • Timer only starts when consultation.startedAt is set and status = IN_PROGRESS
- *  • SOAP generation disabled until transcript is actually available
- *  • Meet Join button only shown when googleMeetingUri is real
+ * Rules:
+ *  - Real data only (no fake patient/doctor fallbacks)
+ *  - Role-aware UI (doctor vs patient experience)
+ *  - Clean clinical typography and calm palette
+ *  - Mobile-responsive layout (no horizontal scroll)
+ *  - Min 44px touch targets
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -29,9 +31,14 @@ import {
   IconArrowLeft,
   IconGoogleMeet,
   IconStethoscope,
+  IconUser,
   IconAlert,
   IconX,
   IconRefresh,
+  IconSparkle,
+  IconCalendar,
+  IconActivity,
+  IconEdit,
 } from '../components/icons';
 import GoogleMeetCard from '../components/GoogleMeetCard';
 import GoogleMeetTranscriptViewer from '../components/GoogleMeetTranscriptViewer';
@@ -40,7 +47,10 @@ function formatTimer(sec) {
   const hrs = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
-  return `${hrs.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  if (hrs > 0) {
+    return `${hrs.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  }
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
 function formatDuration(seconds) {
@@ -54,26 +64,24 @@ function initialsOf(name) {
   return name.split(' ').map((w) => w[0]).filter(Boolean).join('').slice(0, 2).toUpperCase();
 }
 
-const MEET_STATUS_LABELS = {
-  scheduled: { label: 'Scheduled', color: 'badge-secondary', dot: '#94a3b8' },
-  SCHEDULED: { label: 'Scheduled', color: 'badge-secondary', dot: '#94a3b8' },
-  meet_creating: { label: 'Creating Meet...', color: 'badge-warning', dot: '#f59e0b' },
-  MEET_CREATING: { label: 'Creating Meet...', color: 'badge-warning', dot: '#f59e0b' },
-  meet_ready: { label: 'Meet Ready', color: 'badge-success', dot: '#22c55e' },
-  MEET_READY: { label: 'Meet Ready', color: 'badge-success', dot: '#22c55e' },
-  waiting_for_participants: { label: 'Meet Ready', color: 'badge-success', dot: '#22c55e' },
-  meet_creation_failed: { label: 'Meet Creation Failed', color: 'badge-danger', dot: '#ef4444' },
-  MEET_CREATION_FAILED: { label: 'Meet Creation Failed', color: 'badge-danger', dot: '#ef4444' },
-  in_progress: { label: 'In Progress', color: 'badge-primary', dot: '#38bdf8' },
-  IN_PROGRESS: { label: 'In Progress', color: 'badge-primary', dot: '#38bdf8' },
-  meeting_ended: { label: 'Meeting Ended', color: 'badge-warning', dot: '#f59e0b' },
-  transcript_ready: { label: 'Transcript Ready', color: 'badge-success', dot: '#22c55e' },
-  completed: { label: 'Completed', color: 'badge-success', dot: '#22c55e' },
-  COMPLETED: { label: 'Completed', color: 'badge-success', dot: '#22c55e' },
-};
-
-function getMeetStatusMeta(status) {
-  return MEET_STATUS_LABELS[status] || { label: status || 'Unknown', color: 'badge-secondary', dot: '#94a3b8' };
+function getStatusBadge(status) {
+  const s = (status || '').toLowerCase();
+  if (['completed', 'transcript_ready', 'doctor_reviewed', 'finalized'].includes(s)) {
+    return { label: 'Completed', color: 'badge-success', dot: '#10b981' };
+  }
+  if (['in_progress'].includes(s)) {
+    return { label: 'In Progress', color: 'badge-primary', dot: '#3b82f6' };
+  }
+  if (['meet_ready', 'waiting_for_participants'].includes(s)) {
+    return { label: 'Ready', color: 'badge-success', dot: '#10b981' };
+  }
+  if (['meet_creating'].includes(s)) {
+    return { label: 'Preparing...', color: 'badge-warning', dot: '#f59e0b' };
+  }
+  if (s.includes('failed')) {
+    return { label: 'Failed', color: 'badge-danger', dot: '#ef4444' };
+  }
+  return { label: 'Scheduled', color: 'badge-secondary', dot: '#94a3b8' };
 }
 
 export default function VideoConsultationPage() {
@@ -96,7 +104,19 @@ export default function VideoConsultationPage() {
   const [timerActive, setTimerActive] = useState(false);
   const timerRef = useRef(null);
   const [isSummarizing, setIsSummarizing] = useState(false);
-  const [modalPostSummaryOpen, setModalPostSummaryOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('details'); // 'details' | 'transcript' | 'summary'
+
+  // Editable SOAP note for doctors
+  const [isEditingSOAP, setIsEditingSOAP] = useState(false);
+  const [editedSOAP, setEditedSOAP] = useState({
+    subjective: '',
+    objective: '',
+    assessment: '',
+    plan: '',
+  });
+
+  const isDoctor = user?.role === 'doctor' || user?.role === 'admin';
+  const isPatient = user?.role === 'patient';
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -104,17 +124,15 @@ export default function VideoConsultationPage() {
     try {
       let cId = urlConsultationId;
 
-      // ── When launched from appointment (/video?appointmentId=...) ──
-      // Use the rich appointment response: it returns patient, doctor, consultation, googleMeet
       if (!cId && urlAppointmentId) {
         try {
           const apptFull = await getAppointmentFull(urlAppointmentId);
           if (!apptFull?.success) {
-            setLoadError('Appointment not found or access denied.');
+            setLoadError('Appointment record not found or access is restricted.');
             setIsLoading(false);
             return;
           }
-          // Merge appointment block with patient/doctor/meet into a single shape
+
           const mergedAppt = {
             ...apptFull.appointment,
             patient_name: apptFull.patient?.displayName || apptFull.appointment?.patient_name || null,
@@ -130,10 +148,8 @@ export default function VideoConsultationPage() {
           setAppointment(mergedAppt);
           cId = apptFull.consultation?.id || apptFull.appointment?.consultationId || null;
 
-          // If we got consultation data directly, use it
           if (apptFull.consultation) {
             const c = apptFull.consultation;
-            // Augment consultation with patient/doctor names from richer appointment block
             const augmented = {
               ...c,
               patient_name: mergedAppt.patient_name,
@@ -159,57 +175,68 @@ export default function VideoConsultationPage() {
             }
           }
 
-          if (!cId) { setIsLoading(false); return; }
-        } catch (err) {
-          setLoadError('Appointment not found or access denied.');
+          if (!cId) {
+            setIsLoading(false);
+            return;
+          }
+        } catch {
+          setLoadError('Unable to load appointment details. Please try again.');
           setIsLoading(false);
           return;
         }
       }
 
-      if (!cId) { setIsLoading(false); return; }
+      if (!cId) {
+        setIsLoading(false);
+        return;
+      }
       setConsultationId(cId);
 
-      // Only fetch consultation again if we don't already have it from the appointment response
-      const needsConsultationFetch = !consultation;
-      if (needsConsultationFetch) {
-        const cData = await getConsultation(cId);
-        if (!cData) { setLoadError('Consultation not found.'); setIsLoading(false); return; }
-        setConsultation(cData);
-        if (!appointment && (cData.appointment_id || cData.appointmentId)) {
-          try {
-            const apptData = await getAppointment(cData.appointment_id || cData.appointmentId);
-            setAppointment(apptData);
-          } catch {}
-        }
-        const tStatus = cData.transcript_status || 'pending';
-        setTranscriptStatus(tStatus);
-        if (tStatus === 'ready' || cData.status === 'transcript_ready') {
-          try {
-            const tData = await getTranscript(cId);
-            if (Array.isArray(tData) && tData.length > 0) setTranscriptSegments(tData);
-          } catch {}
-        }
-        const consultStatus = cData.status || '';
-        const isActive = ['in_progress', 'IN_PROGRESS'].includes(consultStatus);
-        if (cData.startedAt || cData.started_at) {
-          const startedAt = new Date(cData.startedAt || cData.started_at);
-          const endedAt = (cData.completedAt || cData.completed_at) ? new Date(cData.completedAt || cData.completed_at) : null;
-          const diffSeconds = Math.max(0, Math.floor(((endedAt || new Date()) - startedAt) / 1000));
-          setElapsedSeconds(diffSeconds);
-          if (!endedAt && isActive) setTimerActive(true);
-        } else if (cData.duration_seconds) {
-          setElapsedSeconds(cData.duration_seconds);
-        }
+      const cData = await getConsultation(cId);
+      if (!cData) {
+        setLoadError('Consultation not found.');
+        setIsLoading(false);
+        return;
       }
-    } catch (err) {
-      setLoadError('Could not load consultation data. ' + (err?.message || ''));
+      setConsultation(cData);
+
+      if (!appointment && (cData.appointment_id || cData.appointmentId)) {
+        try {
+          const apptData = await getAppointment(cData.appointment_id || cData.appointmentId);
+          setAppointment(apptData);
+        } catch {}
+      }
+
+      const tStatus = cData.transcript_status || 'pending';
+      setTranscriptStatus(tStatus);
+      if (tStatus === 'ready' || cData.status === 'transcript_ready') {
+        try {
+          const tData = await getTranscript(cId);
+          if (Array.isArray(tData) && tData.length > 0) setTranscriptSegments(tData);
+        } catch {}
+      }
+
+      const consultStatus = (cData.status || '').toLowerCase();
+      const isActive = ['in_progress'].includes(consultStatus);
+      if (cData.startedAt || cData.started_at) {
+        const startedAt = new Date(cData.startedAt || cData.started_at);
+        const endedAt = (cData.completedAt || cData.completed_at) ? new Date(cData.completedAt || cData.completed_at) : null;
+        const diffSeconds = Math.max(0, Math.floor(((endedAt || new Date()) - startedAt) / 1000));
+        setElapsedSeconds(diffSeconds);
+        if (!endedAt && isActive) setTimerActive(true);
+      } else if (cData.duration_seconds) {
+        setElapsedSeconds(cData.duration_seconds);
+      }
+    } catch {
+      setLoadError('Could not load consultation information.');
     } finally {
       setIsLoading(false);
     }
   }, [urlConsultationId, urlAppointmentId]);
 
-  useEffect(() => { if (urlConsultationId || urlAppointmentId) loadData(); }, [loadData]);
+  useEffect(() => {
+    if (urlConsultationId || urlAppointmentId) loadData();
+  }, [loadData]);
 
   useEffect(() => {
     if (timerActive) {
@@ -222,36 +249,35 @@ export default function VideoConsultationPage() {
 
   useEffect(() => {
     if (!consultation) return;
-    const s = consultation.status || consultation.meeting_status || '';
-    const isActive = ['in_progress', 'IN_PROGRESS'].includes(s);
-    const isEnded = ['meeting_ended', 'transcript_ready', 'completed', 'COMPLETED', 'doctor_reviewed', 'finalized'].includes(s);
+    const s = (consultation.status || consultation.meeting_status || '').toLowerCase();
+    const isActive = s === 'in_progress';
+    const isEnded = ['completed', 'meeting_ended', 'transcript_ready', 'doctor_reviewed', 'finalized'].includes(s);
     if (isActive && !timerActive) setTimerActive(true);
     if (isEnded && timerActive) setTimerActive(false);
   }, [consultation]);
 
-  // Derived — NO fake fallbacks
+  // Derived real data only
   const patientName = consultation?.patient_name || appointment?.patient_name || null;
-  const patientId = consultation?.patient_id || appointment?.patient_id || consultation?.patientId || null;
   const patientAge = consultation?.patient_age || appointment?.patient_age || null;
   const patientGender = consultation?.patient_gender || appointment?.patient_gender || null;
-  const patientLanguage = consultation?.language || consultation?.detected_language || appointment?.language || null;
   const doctorName = consultation?.doctor_name || appointment?.doctor_name || null;
   const doctorDept = consultation?.doctor_department || appointment?.doctor_department || consultation?.specialization || null;
   const consultStatus = consultation?.status || consultation?.meeting_status || 'scheduled';
-  const statusMeta = getMeetStatusMeta(consultStatus);
-  const isConsultationCompleted = ['meeting_ended', 'transcript_ready', 'completed', 'COMPLETED', 'doctor_reviewed', 'finalized'].includes(consultStatus);
+  const statusMeta = getStatusBadge(consultStatus);
+  const isConsultationCompleted = ['completed', 'meeting_ended', 'transcript_ready', 'doctor_reviewed', 'finalized'].includes((consultStatus || '').toLowerCase());
   const hasRealTranscript = transcriptSegments.length > 0 && transcriptStatus === 'ready';
-  const patientInitials = patientName ? initialsOf(patientName) : '?';
-  const doctorInitials = doctorName ? initialsOf(doctorName) : '?';
 
-  // SOAP — only real data
+  const appointmentDate = appointment?.appointment_date || (consultation?.created_at ? new Date(consultation.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : null);
+  const appointmentTime = appointment?.appointment_time || (consultation?.created_at ? new Date(consultation.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : null);
+
+  // SOAP extracted data
   const subjectiveText = consultation?.summary?.chief_complaint && consultation.summary.chief_complaint !== 'Not mentioned'
     ? consultation.summary.chief_complaint
     : consultation?.summary?.symptoms?.length
     ? `Patient presents with: ${consultation.summary.symptoms.map((s) => (typeof s === 'string' ? s : s.name)).join(', ')}`
     : null;
   const objectiveText = consultation?.summary?.vitals && (consultation.summary.vitals.bp || consultation.summary.vitals.pulse || consultation.summary.vitals.spo2 || consultation.summary.vitals.temp)
-    ? `BP: ${consultation.summary.vitals.bp || '--'}, HR: ${consultation.summary.vitals.pulse || '--'} bpm, SpO2: ${consultation.summary.vitals.spo2 || '--'}%, Temp: ${consultation.summary.vitals.temp || '--'} C.`
+    ? `BP: ${consultation.summary.vitals.bp || '--'}, HR: ${consultation.summary.vitals.pulse || '--'} bpm, SpO2: ${consultation.summary.vitals.spo2 || '--'}%, Temp: ${consultation.summary.vitals.temp || '--'} C`
     : null;
   const assessmentText = consultation?.summary?.assessment && consultation.summary.assessment !== 'Not mentioned' ? consultation.summary.assessment : null;
   const planText = consultation?.summary?.treatment_plan && consultation.summary.treatment_plan !== 'Not mentioned'
@@ -260,21 +286,39 @@ export default function VideoConsultationPage() {
     ? consultation.summary.doctor_instructions.map((i) => (typeof i === 'string' ? i : i.instruction)).join('. ')
     : null;
 
+  const hasAnySOAP = Boolean(subjectiveText || objectiveText || assessmentText || planText);
+
+  // Initialize edited SOAP when consultation summary changes
+  useEffect(() => {
+    setEditedSOAP({
+      subjective: subjectiveText || '',
+      objective: objectiveText || '',
+      assessment: assessmentText || '',
+      plan: planText || '',
+    });
+  }, [subjectiveText, objectiveText, assessmentText, planText]);
+
   const handleGenerateAISummary = async () => {
-    if (!consultationId) { toastError('No consultation to summarize.', 'No Consultation'); return; }
-    if (!hasRealTranscript) { toastError('A verified transcript is required before generating an AI clinical summary.', 'Transcript Required'); return; }
+    if (!consultationId) {
+      toastError('No consultation selected.', 'Error');
+      return;
+    }
+    if (!hasRealTranscript) {
+      toastError('A completed transcript is required before extracting a clinical summary.', 'Transcript Required');
+      return;
+    }
     setIsSummarizing(true);
-    info('Extracting SOAP summary via AI...', 'AI Extraction');
+    info('Extracting clinical summary from transcript...', 'Clinical Summary');
     try {
       const res = await summarizeConsultation(consultationId);
       if (res?.summary || res?.success) {
         const updated = await getConsultation(consultationId);
         setConsultation(updated);
-        setModalPostSummaryOpen(true);
-        success('Clinical SOAP extraction completed.', 'Summary Ready');
+        setActiveTab('summary');
+        success('Clinical summary generated.', 'Summary Ready');
       }
-    } catch (err) {
-      toastError('Failed to generate AI summary: ' + err.message, 'Extraction Error');
+    } catch {
+      toastError('Failed to generate clinical summary. Please try again.', 'Error');
     } finally {
       setIsSummarizing(false);
     }
@@ -291,47 +335,119 @@ export default function VideoConsultationPage() {
         const tData = await getTranscript(consultationId);
         if (Array.isArray(tData) && tData.length > 0) setTranscriptSegments(tData);
       }
-      info('Status refreshed.', 'Refreshed');
-    } catch { toastError('Could not refresh status.', 'Error'); }
+      info('Consultation status refreshed.', 'Updated');
+    } catch {
+      toastError('Could not refresh status.', 'Error');
+    }
   };
 
+  // Skeleton Loading State
   if (isLoading) {
     return (
       <div className="page-container animate-fade-in" id="video-consultation-page">
-        <div className="flex items-center justify-center" style={{ minHeight: 300 }}>
-          <div className="spinner-container">
-            <span className="spinner" style={{ width: 32, height: 32 }} />
-            <p className="text-sm text-muted">Loading consultation...</p>
+        <div className="flex flex-col gap-5 max-w-4xl mx-auto py-6">
+          {/* Header Skeleton */}
+          <div className="flex items-center justify-between pb-4 border-b border-subtle">
+            <div className="flex items-center gap-3">
+              <div className="skeleton" style={{ width: 36, height: 36, borderRadius: '8px' }} />
+              <div>
+                <div className="skeleton mb-1" style={{ width: 180, height: 22, borderRadius: '4px' }} />
+                <div className="skeleton" style={{ width: 120, height: 14, borderRadius: '4px' }} />
+              </div>
+            </div>
+            <div className="skeleton" style={{ width: 90, height: 28, borderRadius: '20px' }} />
+          </div>
+
+          {/* Identity Skeleton */}
+          <div className="glass-card p-5" style={{ borderRadius: '16px' }}>
+            <div className="flex items-center gap-4">
+              <div className="skeleton" style={{ width: 48, height: 48, borderRadius: '50%' }} />
+              <div className="flex-1">
+                <div className="skeleton mb-1.5" style={{ width: 160, height: 18, borderRadius: '4px' }} />
+                <div className="skeleton" style={{ width: 100, height: 14, borderRadius: '4px' }} />
+              </div>
+            </div>
+          </div>
+
+          {/* Meeting Card Skeleton */}
+          <div className="glass-card p-8 flex flex-col items-center gap-4" style={{ borderRadius: '16px' }}>
+            <div className="skeleton" style={{ width: 56, height: 56, borderRadius: '16px' }} />
+            <div className="skeleton" style={{ width: 220, height: 24, borderRadius: '4px' }} />
+            <div className="skeleton" style={{ width: 160, height: 14, borderRadius: '4px' }} />
+            <div className="skeleton mt-3" style={{ width: '100%', maxWidth: 360, height: 48, borderRadius: '12px' }} />
           </div>
         </div>
       </div>
     );
   }
 
+  // Friendly Error State
   if (loadError) {
     return (
       <div className="page-container animate-fade-in" id="video-consultation-page">
-        <div className="glass-card flex flex-col items-center gap-4 py-12" style={{ textAlign: 'center', maxWidth: 480, margin: '60px auto' }}>
-          <IconAlert size={36} style={{ color: 'var(--color-danger)' }} />
+        <div
+          className="glass-card flex flex-col items-center text-center gap-4 py-12 px-6 max-w-md mx-auto my-12"
+          style={{ borderRadius: '16px', border: '1px solid var(--color-border)' }}
+        >
+          <div
+            style={{
+              width: 52,
+              height: 52,
+              borderRadius: '50%',
+              background: 'rgba(239, 68, 68, 0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--color-danger)',
+            }}
+          >
+            <IconAlert size={28} />
+          </div>
           <h2 className="text-lg font-bold text-primary">Unable to Load Consultation</h2>
           <p className="text-sm text-muted">{loadError}</p>
-          <div className="flex gap-3 flex-wrap justify-center">
-            <button type="button" className="btn btn-secondary" onClick={() => navigate(-1)}><IconArrowLeft size={14} /> Back</button>
-            {consultationId && <button type="button" className="btn btn-primary" onClick={loadData}><IconRefresh size={14} /> Retry</button>}
+          <div className="flex items-center gap-3 mt-2">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm flex items-center gap-1.5"
+              onClick={() => navigate(-1)}
+            >
+              <IconArrowLeft size={14} />
+              <span>Back</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm flex items-center gap-1.5"
+              onClick={loadData}
+            >
+              <IconRefresh size={14} />
+              <span>Retry</span>
+            </button>
           </div>
         </div>
       </div>
     );
   }
 
+  // No consultation selected
   if (!consultationId && !urlAppointmentId) {
     return (
       <div className="page-container animate-fade-in" id="video-consultation-page">
-        <div className="glass-card flex flex-col items-center gap-4 py-12" style={{ textAlign: 'center', maxWidth: 500, margin: '60px auto' }}>
-          <IconGoogleMeet size={40} style={{ color: 'var(--color-primary-400)' }} />
+        <div
+          className="glass-card flex flex-col items-center text-center gap-4 py-12 px-6 max-w-md mx-auto my-12"
+          style={{ borderRadius: '16px', border: '1px solid var(--color-border)' }}
+        >
+          <IconGoogleMeet size={40} />
           <h2 className="text-lg font-bold text-primary">No Consultation Selected</h2>
-          <p className="text-sm text-muted">Please open this page from an appointment or consultation record.</p>
-          <button type="button" className="btn btn-secondary" onClick={() => navigate('/consultations')}><IconArrowLeft size={14} /> View Consultations</button>
+          <p className="text-sm text-muted">
+            Please open this page from your appointments list.
+          </p>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm mt-2"
+            onClick={() => navigate('/appointments')}
+          >
+            View Appointments
+          </button>
         </div>
       </div>
     );
@@ -339,183 +455,523 @@ export default function VideoConsultationPage() {
 
   return (
     <div className="page-container animate-fade-in" id="video-consultation-page">
-      {/* Top Bar */}
-      <div className="flex items-center justify-between flex-wrap gap-4 pb-4 mb-6" style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
-        <div className="flex items-center gap-3">
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate('/consultations')} title="Back"><IconArrowLeft size={16} /></button>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl font-bold tracking-tight text-primary flex items-center gap-2">
-                <IconGoogleMeet size={22} /><span>Google Meet Telehealth Consultation</span>
-              </h1>
-              <span className="badge badge-success text-xs font-mono">REST API v2</span>
-            </div>
-            <p className="text-xs text-muted mt-0.5">Secure clinical video consultation via official Google Meet REST API v2</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className={`badge flex items-center gap-1.5 py-1 px-3 ${statusMeta.color}`}>
-            <span className="status-dot" style={{ background: statusMeta.dot }} /><span>{statusMeta.label}</span>
-          </span>
-          {elapsedSeconds > 0 && (
-            <span className="badge badge-secondary flex items-center gap-1.5 py-1 px-3 font-mono text-xs">
-              <IconClock size={12} />
-              {isConsultationCompleted ? `Duration: ${formatDuration(elapsedSeconds)}` : formatTimer(elapsedSeconds)}
-            </span>
-          )}
-          <button type="button" className="btn btn-ghost btn-sm flex items-center gap-1.5" onClick={handleRefreshStatus} title="Refresh">
-            <IconRefresh size={14} /> Refresh
-          </button>
-          {consultationId && (
-            <button type="button" className="btn btn-secondary btn-sm flex items-center gap-1.5" onClick={() => navigate(`/consultations/${consultationId}`)}>
-              <IconDoc size={14} /> View Full EHR
+      <div className="flex flex-col gap-5 max-w-4xl mx-auto pb-12">
+        {/* SECTION 1: TOP HEADER */}
+        <header className="flex items-center justify-between flex-wrap gap-3 pb-4 border-b border-subtle">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm p-2 text-muted hover:text-primary"
+              onClick={() => navigate(-1)}
+              title="Back"
+            >
+              <IconArrowLeft size={18} />
             </button>
-          )}
-        </div>
-      </div>
-
-      {/* Patient & Doctor Banner */}
-      <div className="glass-card mb-6" style={{ padding: '16px 20px', background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)' }}>
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div className="flex items-center gap-4">
-            <div className="avatar" style={{ width: 44, height: 44, fontSize: '1.1rem' }}>{patientInitials}</div>
             <div>
-              {patientName ? (
-                <>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-bold text-primary tracking-tight" style={{ margin: 0 }}>
+                  Telehealth Consultation
+                </h1>
+              </div>
+              <p className="text-xs text-muted mt-0.5">
+                Video consultation · <span className="text-secondary">Powered by Google Meet</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            <span
+              className={`badge ${statusMeta.color} flex items-center gap-1.5 py-1 px-3 text-xs font-semibold`}
+            >
+              <span className="status-dot" style={{ background: statusMeta.dot }} />
+              <span>{statusMeta.label}</span>
+            </span>
+
+            {elapsedSeconds > 0 && (
+              <span className="badge badge-secondary flex items-center gap-1.5 py-1 px-2.5 font-mono text-xs">
+                <IconClock size={12} />
+                <span>
+                  {isConsultationCompleted
+                    ? `Duration: ${formatDuration(elapsedSeconds)}`
+                    : formatTimer(elapsedSeconds)}
+                </span>
+              </span>
+            )}
+
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm p-2 text-muted hover:text-primary"
+              onClick={handleRefreshStatus}
+              title="Refresh Consultation"
+            >
+              <IconRefresh size={15} />
+            </button>
+          </div>
+        </header>
+
+        {/* SECTION 2: IDENTITY CARD */}
+        <div
+          className="glass-card animate-fade-in"
+          style={{
+            padding: '16px 20px',
+            borderRadius: '16px',
+            background: 'var(--color-bg-surface)',
+            border: '1px solid var(--color-border)',
+          }}
+        >
+          {/* Patient View: Focus on Doctor */}
+          {isPatient ? (
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-center gap-3.5">
+                <div
+                  className="avatar"
+                  style={{
+                    width: 46,
+                    height: 46,
+                    fontSize: '1rem',
+                    borderRadius: '50%',
+                    background: 'rgba(59, 130, 246, 0.12)',
+                    color: 'var(--color-primary)',
+                    fontWeight: 700,
+                  }}
+                >
+                  {doctorName ? initialsOf(doctorName) : <IconStethoscope size={20} />}
+                </div>
+                <div>
+                  <div className="font-bold text-base text-primary">
+                    {doctorName ? (doctorName.startsWith('Dr.') ? doctorName : `Dr. ${doctorName}`) : 'Assigned Physician'}
+                  </div>
+                  <div className="text-xs text-muted mt-0.5">
+                    {doctorDept || 'General Consultation'}
+                  </div>
+                </div>
+              </div>
+
+              {(appointmentDate || appointmentTime) && (
+                <div className="flex items-center gap-2 text-xs text-secondary bg-base py-1.5 px-3 rounded-lg border border-subtle">
+                  <IconCalendar size={13} className="text-muted" />
+                  <span>
+                    {[appointmentDate, appointmentTime].filter(Boolean).join(' · ')}
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Doctor/Staff View: Focus on Patient */
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-center gap-3.5">
+                <div
+                  className="avatar"
+                  style={{
+                    width: 46,
+                    height: 46,
+                    fontSize: '1rem',
+                    borderRadius: '50%',
+                    background: 'rgba(16, 185, 129, 0.12)',
+                    color: 'var(--color-success)',
+                    fontWeight: 700,
+                  }}
+                >
+                  {patientName ? initialsOf(patientName) : <IconUser size={20} />}
+                </div>
+                <div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-bold text-base text-primary">{patientName}</span>
+                    <span className="font-bold text-base text-primary">
+                      {patientName || 'Patient Consultation'}
+                    </span>
                     {(patientGender || patientAge) && (
                       <span className="badge badge-secondary text-xs">
                         {[patientGender, patientAge ? `${patientAge} yrs` : null].filter(Boolean).join(' · ')}
                       </span>
                     )}
-                    {patientId && <span className="text-xs font-mono text-muted">ID: {patientId}</span>}
                   </div>
-                  <div className="text-xs text-muted mt-1 flex items-center gap-3 flex-wrap">
-                    {patientLanguage && <span>Language: <strong>{patientLanguage}</strong></span>}
-                    <span>Type: <strong>Google Meet Telehealth</strong></span>
+                  <div className="text-xs text-muted mt-0.5">
+                    {doctorDept ? `Specialty: ${doctorDept}` : 'Telehealth Consultation'}
+                  </div>
+                </div>
+              </div>
+
+              {(appointmentDate || appointmentTime) && (
+                <div className="flex items-center gap-2 text-xs text-secondary bg-base py-1.5 px-3 rounded-lg border border-subtle">
+                  <IconCalendar size={13} className="text-muted" />
+                  <span>
+                    {[appointmentDate, appointmentTime].filter(Boolean).join(' · ')}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* SECTION 3: MAIN GOOGLE MEET CARD */}
+        <GoogleMeetCard
+          consultation={consultation}
+          appointment={appointment}
+          isDoctor={isDoctor}
+          onViewTranscript={() => setActiveTab('transcript')}
+          onTranscriptReady={(transcriptData) => {
+            if (transcriptData?.entries && transcriptData.entries.length > 0) {
+              setTranscriptSegments(transcriptData.entries);
+              setTranscriptStatus('ready');
+            }
+          }}
+          onConsultationUpdated={async () => {
+            if (consultationId) {
+              try {
+                const updated = await getConsultation(consultationId);
+                setConsultation(updated);
+                const tStatus = updated?.transcript_status || 'pending';
+                setTranscriptStatus(tStatus);
+                if (tStatus === 'ready') {
+                  const tData = await getTranscript(consultationId);
+                  if (Array.isArray(tData)) setTranscriptSegments(tData);
+                }
+              } catch {}
+            }
+          }}
+          onStatusChange={(newStatus) => {
+            if (['in_progress'].includes(newStatus)) setTimerActive(true);
+            else if (['completed', 'meeting_ended'].includes(newStatus)) setTimerActive(false);
+          }}
+        />
+
+        {/* SECTION 4: TABS (CONSULTATION DETAILS | TRANSCRIPT | CLINICAL SUMMARY) */}
+        <div className="flex flex-col gap-4 mt-2">
+          {/* Tab Navigation */}
+          <div className="flex items-center gap-1 border-b border-subtle pb-1">
+            <button
+              type="button"
+              className={`btn btn-sm ${activeTab === 'details' ? 'btn-primary' : 'btn-ghost text-secondary'}`}
+              onClick={() => setActiveTab('details')}
+            >
+              <IconDoc size={15} />
+              <span>Consultation Details</span>
+            </button>
+
+            <button
+              type="button"
+              className={`btn btn-sm ${activeTab === 'transcript' ? 'btn-primary' : 'btn-ghost text-secondary'}`}
+              onClick={() => setActiveTab('transcript')}
+            >
+              <IconClock size={15} />
+              <span>Transcript</span>
+              {hasRealTranscript && (
+                <span className="badge badge-success text-xs ml-1 py-0.5 px-1.5">
+                  {transcriptSegments.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              className={`btn btn-sm ${activeTab === 'summary' ? 'btn-primary' : 'btn-ghost text-secondary'}`}
+              onClick={() => setActiveTab('summary')}
+            >
+              <IconSparkle size={15} />
+              <span>Clinical Summary</span>
+              {hasAnySOAP && (
+                <span className="badge badge-success text-xs ml-1 py-0.5 px-1.5">SOAP</span>
+              )}
+            </button>
+          </div>
+
+          {/* TAB 1: CONSULTATION DETAILS */}
+          {activeTab === 'details' && (
+            <div
+              className="glass-card animate-fade-in p-6"
+              style={{
+                borderRadius: '16px',
+                background: 'var(--color-bg-surface)',
+                border: '1px solid var(--color-border)',
+              }}
+            >
+              <h3 className="text-base font-bold text-primary mb-4">
+                Consultation Information
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                <div className="p-3.5 rounded-xl border border-subtle" style={{ background: 'var(--color-bg-base)' }}>
+                  <span className="text-xs text-muted block mb-1">Date &amp; Time</span>
+                  <span className="font-semibold text-primary">
+                    {[appointmentDate, appointmentTime].filter(Boolean).join(' at ') || 'Scheduled session'}
+                  </span>
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-subtle" style={{ background: 'var(--color-bg-base)' }}>
+                  <span className="text-xs text-muted block mb-1">Consultation Type</span>
+                  <span className="font-semibold text-primary">
+                    Video Consultation (Google Meet)
+                  </span>
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-subtle" style={{ background: 'var(--color-bg-base)' }}>
+                  <span className="text-xs text-muted block mb-1">Attending Clinician</span>
+                  <span className="font-semibold text-primary">
+                    {doctorName ? (doctorName.startsWith('Dr.') ? doctorName : `Dr. ${doctorName}`) : 'Assigned Doctor'}
+                  </span>
+                  {doctorDept && <span className="text-xs text-muted block mt-0.5">{doctorDept}</span>}
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-subtle" style={{ background: 'var(--color-bg-base)' }}>
+                  <span className="text-xs text-muted block mb-1">Patient</span>
+                  <span className="font-semibold text-primary">
+                    {patientName || 'Patient'}
+                  </span>
+                  {(patientGender || patientAge) && (
+                    <span className="text-xs text-muted block mt-0.5">
+                      {[patientGender, patientAge ? `${patientAge} yrs` : null].filter(Boolean).join(', ')}
+                    </span>
+                  )}
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-subtle sm:col-span-2" style={{ background: 'var(--color-bg-base)' }}>
+                  <span className="text-xs text-muted block mb-1">Consultation Status</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`badge ${statusMeta.color} text-xs font-semibold py-1 px-2.5`}>
+                      {statusMeta.label}
+                    </span>
                     {consultation?.google_meeting_code && (
-                      <span className="text-primary font-mono font-medium flex items-center gap-1">
-                        <IconGoogleMeet size={12} /> {consultation.google_meeting_code}
+                      <span className="text-xs font-mono text-muted">
+                        Meeting code: <strong>{consultation.google_meeting_code}</strong>
                       </span>
                     )}
                   </div>
-                </>
-              ) : (
-                <div>
-                  <span className="text-sm text-muted font-medium">Patient information unavailable</span>
-                  <div className="text-xs text-muted font-mono mt-0.5">ID: --</div>
                 </div>
-              )}
-            </div>
-          </div>
 
-          <div className="flex items-center gap-3 border-l border-subtle pl-4">
-            <div className="avatar" style={{ width: 40, height: 40, fontSize: '0.95rem' }}>{doctorInitials}</div>
-            <div>
-              {doctorName ? (
-                <>
-                  <div className="font-semibold text-sm text-primary flex items-center gap-1">
-                    <IconStethoscope size={14} />{doctorName.startsWith('Dr.') ? doctorName : `Dr. ${doctorName}`}
+                {appointment?.reason_for_visit && (
+                  <div className="p-3.5 rounded-xl border border-subtle sm:col-span-2" style={{ background: 'var(--color-bg-base)' }}>
+                    <span className="text-xs text-muted block mb-1">Reason for Visit</span>
+                    <p className="text-sm text-primary" style={{ margin: 0 }}>
+                      {appointment.reason_for_visit}
+                    </p>
                   </div>
-                  <div className="text-xs text-muted">{doctorDept || 'Attending Physician'}</div>
-                </>
-              ) : (
-                <div className="font-semibold text-sm text-muted flex items-center gap-1">
-                  <IconStethoscope size={14} /> Doctor information unavailable
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: TRANSCRIPT */}
+          {activeTab === 'transcript' && (
+            <GoogleMeetTranscriptViewer
+              consultation={consultation}
+              segments={transcriptSegments}
+              transcriptStatus={transcriptStatus}
+              isDoctor={isDoctor}
+              onGenerateSummary={hasRealTranscript ? handleGenerateAISummary : null}
+              isSummarizing={isSummarizing}
+              onRetrySync={handleRefreshStatus}
+              onMarkReviewed={
+                hasRealTranscript && isDoctor
+                  ? async () => { success('Transcript marked as reviewed.', 'Verified'); }
+                  : null
+              }
+            />
+          )}
+
+          {/* TAB 3: CLINICAL SUMMARY (SOAP) */}
+          {activeTab === 'summary' && (
+            <div
+              className="glass-card animate-fade-in p-6 flex flex-col gap-4"
+              style={{
+                borderRadius: '16px',
+                background: 'var(--color-bg-surface)',
+                border: '1px solid var(--color-border)',
+              }}
+            >
+              <div className="flex items-center justify-between flex-wrap gap-3 pb-3 border-b border-subtle">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-primary" style={{ margin: 0 }}>
+                      Clinical Summary
+                    </h3>
+                    <span className="badge badge-secondary text-xs">AI-assisted summary</span>
+                  </div>
+                  <p className="text-xs text-muted mt-0.5">
+                    Structured SOAP clinical documentation derived from consultation dialogue
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`badge ${consultation?.is_approved ? 'badge-success' : 'badge-warning'} text-xs`}
+                  >
+                    {consultation?.is_approved ? '✓ Doctor Approved' : 'Needs Doctor Review'}
+                  </span>
+
+                  {isDoctor && hasAnySOAP && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-xs text-secondary flex items-center gap-1"
+                      onClick={() => setIsEditingSOAP(!isEditingSOAP)}
+                    >
+                      <IconEdit size={12} />
+                      <span>{isEditingSOAP ? 'Cancel Edit' : 'Edit Note'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Empty / Not Ready State */}
+              {!hasAnySOAP && (
+                <div
+                  className="flex flex-col items-center justify-center py-10 px-4 text-center rounded-xl border border-dashed border-subtle"
+                  style={{ background: 'var(--color-bg-base)' }}
+                >
+                  <IconSparkle size={32} className="text-muted mb-2" />
+                  <p className="text-sm font-semibold text-primary">No clinical summary generated yet.</p>
+                  <p className="text-xs text-muted max-w-sm mt-1 mb-4">
+                    {hasRealTranscript
+                      ? 'The transcript is ready. You can extract the structured SOAP summary now.'
+                      : 'Clinical summaries are extracted once the consultation dialogue transcript is available.'}
+                  </p>
+
+                  {isDoctor && hasRealTranscript && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm flex items-center gap-1.5"
+                      onClick={handleGenerateAISummary}
+                      disabled={isSummarizing}
+                    >
+                      <IconSparkle size={14} className={isSummarizing ? 'animate-spin' : ''} />
+                      <span>{isSummarizing ? 'Extracting...' : 'Extract Clinical Summary'}</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* SOAP Content */}
+              {hasAnySOAP && (
+                <div className="flex flex-col gap-3.5">
+                  {/* Subjective */}
+                  <div
+                    className="p-4 rounded-xl border border-subtle text-left"
+                    style={{ background: 'var(--color-bg-base)' }}
+                  >
+                    <div className="text-xs font-bold uppercase tracking-wider text-primary mb-1">
+                      S — Subjective (Chief Complaint &amp; Symptoms)
+                    </div>
+                    {isEditingSOAP && isDoctor ? (
+                      <textarea
+                        className="input w-full text-sm mt-1"
+                        rows={2}
+                        value={editedSOAP.subjective}
+                        onChange={(e) => setEditedSOAP({ ...editedSOAP, subjective: e.target.value })}
+                      />
+                    ) : (
+                      <p className="text-sm text-primary" style={{ margin: 0, lineHeight: 1.55 }}>
+                        {editedSOAP.subjective || subjectiveText || 'No subjective complaints reported.'}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Objective */}
+                  <div
+                    className="p-4 rounded-xl border border-subtle text-left"
+                    style={{ background: 'var(--color-bg-base)' }}
+                  >
+                    <div className="text-xs font-bold uppercase tracking-wider text-primary mb-1">
+                      O — Objective (Observations &amp; Vitals)
+                    </div>
+                    {isEditingSOAP && isDoctor ? (
+                      <textarea
+                        className="input w-full text-sm mt-1"
+                        rows={2}
+                        value={editedSOAP.objective}
+                        onChange={(e) => setEditedSOAP({ ...editedSOAP, objective: e.target.value })}
+                      />
+                    ) : (
+                      <p className="text-sm text-primary" style={{ margin: 0, lineHeight: 1.55 }}>
+                        {editedSOAP.objective || objectiveText || 'No objective vital signs recorded during session.'}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Assessment */}
+                  <div
+                    className="p-4 rounded-xl border border-subtle text-left"
+                    style={{ background: 'var(--color-bg-base)' }}
+                  >
+                    <div className="text-xs font-bold uppercase tracking-wider text-primary mb-1">
+                      A — Assessment (Clinical Impression)
+                    </div>
+                    {isEditingSOAP && isDoctor ? (
+                      <textarea
+                        className="input w-full text-sm mt-1"
+                        rows={2}
+                        value={editedSOAP.assessment}
+                        onChange={(e) => setEditedSOAP({ ...editedSOAP, assessment: e.target.value })}
+                      />
+                    ) : (
+                      <p className="text-sm text-primary" style={{ margin: 0, lineHeight: 1.55 }}>
+                        {editedSOAP.assessment || assessmentText || 'Clinical assessment pending.'}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Plan */}
+                  <div
+                    className="p-4 rounded-xl border border-subtle text-left"
+                    style={{ background: 'var(--color-bg-base)' }}
+                  >
+                    <div className="text-xs font-bold uppercase tracking-wider text-primary mb-1">
+                      P — Plan (Treatment &amp; Follow-up)
+                    </div>
+                    {isEditingSOAP && isDoctor ? (
+                      <textarea
+                        className="input w-full text-sm mt-1"
+                        rows={2}
+                        value={editedSOAP.plan}
+                        onChange={(e) => setEditedSOAP({ ...editedSOAP, plan: e.target.value })}
+                      />
+                    ) : (
+                      <p className="text-sm text-primary" style={{ margin: 0, lineHeight: 1.55 }}>
+                        {editedSOAP.plan || planText || 'Treatment plan pending.'}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Doctor Review & EHR Commit Actions */}
+                  {isDoctor && (
+                    <div className="flex items-center justify-between flex-wrap gap-2 pt-3 border-t border-subtle">
+                      <span className="text-xs text-muted">
+                        Attending physician review required before finalizing.
+                      </span>
+
+                      <div className="flex items-center gap-2">
+                        {isEditingSOAP && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => {
+                              setIsEditingSOAP(false);
+                              success('Clinical notes updated.', 'Saved');
+                            }}
+                          >
+                            Save Edits
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm flex items-center gap-1.5"
+                          onClick={() => {
+                            success('Clinical notes approved and committed to EHR record.', 'Approved');
+                            if (consultationId) navigate(`/consultations/${consultationId}`);
+                          }}
+                        >
+                          <IconCheck size={14} />
+                          <span>Approve &amp; Commit to EHR</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          </div>
+          )}
         </div>
       </div>
-
-      {/* Status Banner — only shown when not in initial scheduled state */}
-      {consultStatus !== 'scheduled' && (
-        <div className="mb-6 flex items-center gap-3 px-4 py-3 rounded-lg border"
-          style={{
-            background: isConsultationCompleted ? 'rgba(34,197,94,0.07)' : timerActive ? 'rgba(56,189,248,0.07)' : 'rgba(245,158,11,0.07)',
-            borderColor: isConsultationCompleted ? 'rgba(34,197,94,0.3)' : timerActive ? 'rgba(56,189,248,0.3)' : 'rgba(245,158,11,0.3)',
-          }}>
-          <span className="status-dot" style={{ background: statusMeta.dot }} />
-          <span className="text-sm font-semibold text-primary">
-            {timerActive
-              ? `Consultation in progress — ${formatTimer(elapsedSeconds)}`
-              : isConsultationCompleted
-              ? `Consultation completed${elapsedSeconds > 0 ? ` — Duration: ${formatDuration(elapsedSeconds)}` : ''}`
-              : statusMeta.label}
-          </span>
-        </div>
-      )}
-
-      {/* Main Workspace */}
-      <div className="grid grid-cols-1 gap-6">
-        <section>
-          <GoogleMeetCard
-            consultation={consultation}
-            appointment={appointment}
-            onTranscriptReady={(transcriptData) => {
-              if (transcriptData?.entries && transcriptData.entries.length > 0) {
-                setTranscriptSegments(transcriptData.entries);
-                setTranscriptStatus('ready');
-              }
-            }}
-            onConsultationUpdated={async () => {
-              if (consultationId) {
-                try {
-                  const updated = await getConsultation(consultationId);
-                  setConsultation(updated);
-                  const tStatus = updated?.transcript_status || 'pending';
-                  setTranscriptStatus(tStatus);
-                  if (tStatus === 'ready') {
-                    const tData = await getTranscript(consultationId);
-                    if (Array.isArray(tData)) setTranscriptSegments(tData);
-                  }
-                } catch {}
-              }
-            }}
-            onStatusChange={(newStatus) => {
-              if (['in_progress', 'IN_PROGRESS'].includes(newStatus)) setTimerActive(true);
-              else if (['meeting_ended', 'completed', 'COMPLETED'].includes(newStatus)) setTimerActive(false);
-            }}
-          />
-        </section>
-        <section>
-          <GoogleMeetTranscriptViewer
-            consultation={consultation}
-            segments={transcriptSegments}
-            transcriptStatus={transcriptStatus}
-            onGenerateSummary={hasRealTranscript ? handleGenerateAISummary : null}
-            isSummarizing={isSummarizing}
-            onMarkReviewed={hasRealTranscript ? async () => { success('Transcript marked as reviewed.', 'Verified'); } : null}
-          />
-        </section>
-      </div>
-
-      {/* SOAP Modal — only when real summary data exists */}
-      {modalPostSummaryOpen && (subjectiveText || objectiveText || assessmentText || planText) && (
-        <div className="th-modal-backdrop animate-fade-in">
-          <div className="th-modal" style={{ maxWidth: 680, width: '90%' }}>
-            <div className="th-modal-header">
-              <div className="th-modal-title flex items-center gap-2"><IconDoc size={18} /><span>Extracted Clinical SOAP Summary</span></div>
-              <button type="button" className="th-modal-close" onClick={() => setModalPostSummaryOpen(false)}><IconX size={16} /></button>
-            </div>
-            <div className="th-modal-body flex flex-col gap-4">
-              {subjectiveText && <div className="th-summary-section"><span className="th-summary-label">S — Subjective</span><span className="th-summary-text">{subjectiveText}</span></div>}
-              {objectiveText && <div className="th-summary-section"><span className="th-summary-label">O — Objective</span><span className="th-summary-text">{objectiveText}</span></div>}
-              {assessmentText && <div className="th-summary-section"><span className="th-summary-label">A — Assessment</span><span className="th-summary-text">{assessmentText}</span></div>}
-              {planText && <div className="th-summary-section"><span className="th-summary-label">P — Plan</span><span className="th-summary-text">{planText}</span></div>}
-            </div>
-            <div className="th-modal-footer flex items-center justify-between">
-              <button type="button" className="btn btn-secondary" onClick={() => setModalPostSummaryOpen(false)}>Close</button>
-              <button type="button" className="btn btn-primary flex items-center gap-1.5"
-                onClick={() => { success('SOAP notes synced to EHR.', 'EHR Sign-off'); setModalPostSummaryOpen(false); if (consultationId) navigate(`/consultations/${consultationId}`); }}>
-                <IconCheck size={14} /> Sign &amp; Commit to EHR
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
+
