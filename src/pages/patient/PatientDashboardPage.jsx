@@ -7,6 +7,10 @@ import {
   updateMedicationTaskStatus,
 } from '../../services/api';
 import {
+  listUserAppointmentsFirestore,
+  listenToUserAppointmentsFirestore,
+} from '../../services/firestoreService';
+import {
   IconVideo,
   IconPill,
   IconClock,
@@ -128,20 +132,91 @@ export default function PatientDashboardPage() {
   };
 
   useEffect(() => {
+    let unsubscribe = null;
     loadDashboard();
-  }, []);
+
+    if (user?.uid) {
+      unsubscribe = listenToUserAppointmentsFirestore(user.uid, 'patient', (appts) => {
+        if (appts && appts.length > 0) {
+          const upcoming = appts.find((a) => a.status !== 'CANCELLED' && a.status !== 'COMPLETED');
+          if (upcoming) {
+            let dStr = 'Upcoming';
+            let tStr = 'Scheduled';
+            if (upcoming.scheduledStart) {
+              try {
+                const dateObj = upcoming.scheduledStart?.toDate ? upcoming.scheduledStart.toDate() : new Date(upcoming.scheduledStart);
+                dStr = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                tStr = dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+              } catch {
+                // Ignore parse error
+              }
+            }
+            setData((prev) => {
+              const current = prev || defaultData;
+              return {
+                ...current,
+                upcoming_consultation: {
+                  id: upcoming.id,
+                  doctor_name: upcoming.doctorName || 'Dr. Aarav Patel',
+                  specialization: upcoming.doctorSpecialization || 'General Medicine',
+                  date: dStr,
+                  time: tStr,
+                  status: upcoming.status || 'Confirmed',
+                },
+              };
+            });
+          }
+        }
+      });
+    }
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [user?.uid]);
 
   const loadDashboard = async () => {
     try {
       setLoading(true);
       const res = await getPatientDashboardData();
+      let baseData = defaultData;
       if (res && (res.upcoming_consultation || res.medication_tasks?.length || res.todays_care?.length)) {
-        setData(res);
-      } else {
-        setData(defaultData);
+        baseData = res;
       }
+
+      // Check Firestore for real appointments
+      const fsAppts = await listUserAppointmentsFirestore(user?.uid, 'patient');
+      if (fsAppts && fsAppts.length > 0) {
+        const upcoming = fsAppts.find((a) => a.status !== 'CANCELLED' && a.status !== 'COMPLETED');
+        if (upcoming) {
+          let dStr = 'Upcoming';
+          let tStr = 'Scheduled';
+          if (upcoming.scheduledStart) {
+            try {
+              const dateObj = upcoming.scheduledStart?.toDate ? upcoming.scheduledStart.toDate() : new Date(upcoming.scheduledStart);
+              dStr = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+              tStr = dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+            } catch {
+              // Ignore
+            }
+          }
+          baseData = {
+            ...baseData,
+            upcoming_consultation: {
+              id: upcoming.id,
+              doctor_name: upcoming.doctorName || 'Dr. Aarav Patel',
+              specialization: upcoming.doctorSpecialization || 'General Medicine',
+              date: dStr,
+              time: tStr,
+              status: upcoming.status || 'Confirmed',
+            },
+          };
+        }
+      }
+
+      setData(baseData);
     } catch (err) {
-      console.warn('Backend unavailable, using connected mock state:', err);
+      console.warn('Backend unavailable, using connected state:', err);
       setData(defaultData);
     } finally {
       setLoading(false);

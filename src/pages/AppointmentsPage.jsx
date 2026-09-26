@@ -50,6 +50,15 @@ const SPECIALIZATIONS = [
   'Orthopedics', 'Pediatrics', 'Dermatology', 'Internal Medicine',
 ];
 
+const DEFAULT_DOCTORS = [
+  { id: 'dr_01', doctorId: 'dr_01', fullName: 'Dr. Aarav Patel', displayName: 'Dr. Aarav Patel', specialization: 'General Medicine', medicalDegree: 'MD, MBBS' },
+  { id: 'dr_02', doctorId: 'dr_02', fullName: 'Dr. Sarah Jenkins', displayName: 'Dr. Sarah Jenkins', specialization: 'Cardiology', medicalDegree: 'MD (Cardiology)' },
+  { id: 'dr_03', doctorId: 'dr_03', fullName: 'Dr. Rajesh Sharma', displayName: 'Dr. Rajesh Sharma', specialization: 'Neurology', medicalDegree: 'DM (Neurology)' },
+  { id: 'dr_04', doctorId: 'dr_04', fullName: 'Dr. Priya Nair', displayName: 'Dr. Priya Nair', specialization: 'Pediatrics', medicalDegree: 'MD (Pediatrics)' },
+  { id: 'dr_05', doctorId: 'dr_05', fullName: 'Dr. Michael Chang', displayName: 'Dr. Michael Chang', specialization: 'Orthopedics', medicalDegree: 'MS (Ortho)' },
+  { id: 'dr_06', doctorId: 'dr_06', fullName: 'Dr. Ananya Roy', displayName: 'Dr. Ananya Roy', specialization: 'Dermatology', medicalDegree: 'MD (Dermatology)' },
+];
+
 export default function AppointmentsPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -75,13 +84,13 @@ export default function AppointmentsPage() {
   const [actionLoading, setActionLoading] = useState(false);
 
   // Available doctors for booking
-  const [doctorsList, setDoctorsList] = useState([]);
+  const [doctorsList, setDoctorsList] = useState(DEFAULT_DOCTORS);
 
   // Booking Form State
   const [bookForm, setBookForm] = useState({
-    doctorId: '',
-    doctorName: '',
-    doctorSpecialization: 'General Medicine',
+    doctorId: DEFAULT_DOCTORS[0].id,
+    doctorName: DEFAULT_DOCTORS[0].fullName,
+    doctorSpecialization: DEFAULT_DOCTORS[0].specialization,
     appointmentType: 'video', // 'video' | 'in_person'
     date: new Date().toISOString().split('T')[0],
     timeSlot: '10:00 AM',
@@ -112,23 +121,35 @@ export default function AppointmentsPage() {
     async function loadDoctors() {
       try {
         const docs = await getVerifiedDoctorsFirestore();
-        if (docs && docs.length > 0) {
-          setDoctorsList(docs);
-          if (!bookForm.doctorId && docs[0]) {
-            setBookForm(prev => ({
-              ...prev,
-              doctorId: docs[0].id || docs[0].doctorId || 'dr_01',
-              doctorName: docs[0].fullName || docs[0].displayName || 'Dr. Specialist',
-              doctorSpecialization: docs[0].specialization || 'General Medicine',
-            }));
-          }
+        const merged = docs && docs.length > 0 ? docs : DEFAULT_DOCTORS;
+        setDoctorsList(merged);
+
+        const qDocId = searchParams.get('doctorId');
+        const qDocName = searchParams.get('doctorName');
+        const qDocSpec = searchParams.get('specialization');
+
+        if (qDocId) {
+          setBookForm(prev => ({
+            ...prev,
+            doctorId: qDocId,
+            doctorName: qDocName || 'Dr. Specialist',
+            doctorSpecialization: qDocSpec || 'General Medicine',
+          }));
+        } else if (merged[0]) {
+          setBookForm(prev => ({
+            ...prev,
+            doctorId: prev.doctorId || merged[0].id || merged[0].doctorId || 'dr_01',
+            doctorName: prev.doctorName || merged[0].fullName || merged[0].displayName || 'Dr. Aarav Patel',
+            doctorSpecialization: prev.doctorSpecialization || merged[0].specialization || 'General Medicine',
+          }));
         }
       } catch (err) {
         console.warn('Failed to load doctors list:', err);
+        setDoctorsList(DEFAULT_DOCTORS);
       }
     }
     loadDoctors();
-  }, []);
+  }, [searchParams]);
 
   // Sync user profile into form
   useEffect(() => {
@@ -332,41 +353,91 @@ export default function AppointmentsPage() {
       }
 
       // 2. Dual-write to Firebase Firestore
-      if (user?.uid) {
-        await createAppointmentFirestore(user.uid, {
-          ...payload,
-          id: createdApt?.id,
-          scheduledStart: scheduledDateTime,
+      const firestoreApt = await createAppointmentFirestore(user?.uid || 'patient_demo', {
+        ...payload,
+        id: createdApt?.id,
+        scheduledStart: scheduledDateTime,
+      });
+
+      // Immediate local state update to ensure UI displays booking immediately
+      if (firestoreApt) {
+        setAppointments(prev => {
+          const filtered = prev.filter(a => a.id !== firestoreApt.id);
+          const newItem = {
+            id: firestoreApt.id,
+            patientId: firestoreApt.patientId,
+            patientName: firestoreApt.patientName,
+            patientAge: firestoreApt.patientAge,
+            patientGender: firestoreApt.patientGender,
+            patientLanguage: firestoreApt.patientLanguage,
+            doctorId: firestoreApt.doctorId,
+            doctorName: firestoreApt.doctorName,
+            doctorSpecialization: firestoreApt.doctorSpecialization,
+            appointmentType: firestoreApt.consultationType,
+            scheduledAt: firestoreApt.scheduledStart,
+            reason: firestoreApt.reason,
+            status: firestoreApt.status || 'SCHEDULED',
+            meetStatus: firestoreApt.meetStatus || 'SCHEDULED',
+            googleMeetingUri: firestoreApt.googleMeetingUri || '',
+            googleMeetingCode: firestoreApt.googleMeetingCode || '',
+            googleSpaceName: firestoreApt.googleSpaceName || '',
+            consultationId: firestoreApt.consultationId || null,
+          };
+          return [newItem, ...filtered];
         });
       }
 
-      success('Your appointment has been successfully scheduled!', 'Appointment Confirmed');
+      success('Your appointment has been successfully scheduled and synced with Firebase!', 'Appointment Confirmed');
       setShowBookModal(false);
 
-      // Refresh list
-      const res = await getAppointments().catch(() => null);
-      if (res?.appointments) {
-        const formatted = res.appointments.map(item => {
-          const apt = item.appointment || item;
-          return {
-            id: apt.id,
-            patientId: apt.patientId || apt.patient_id,
-            patientName: item.patient?.displayName || apt.patient_name || 'Patient',
-            doctorId: apt.doctorId || apt.doctor_id,
-            doctorName: item.doctor?.displayName || apt.doctor_name || 'Dr. Specialist',
-            doctorSpecialization: item.doctor?.specialization || apt.doctor_specialization || 'General Medicine',
-            appointmentType: (apt.consultationType || apt.appointment_type || 'video').toLowerCase(),
-            scheduledAt: apt.scheduledStart || apt.scheduled_at,
-            reason: apt.reason || 'General Consultation',
-            status: (apt.status || 'SCHEDULED').toUpperCase(),
-            meetStatus: item.googleMeet?.status || apt.meet_status || 'SCHEDULED',
-            googleMeetingUri: item.googleMeet?.meetingUri || apt.google_meeting_uri,
-            googleMeetingCode: item.googleMeet?.meetingCode || apt.google_meeting_code,
-            googleSpaceName: item.googleMeet?.spaceName || apt.google_space_name,
-            consultationId: apt.consultationId || apt.consultation_id,
-          };
-        });
-        setAppointments(formatted);
+      // Refresh list from backend if available
+      try {
+        const res = await getAppointments();
+        if (res?.appointments && res.appointments.length > 0) {
+          const formatted = res.appointments.map(item => {
+            const apt = item.appointment || item;
+            return {
+              id: apt.id,
+              patientId: apt.patientId || apt.patient_id,
+              patientName: item.patient?.displayName || apt.patient_name || 'Patient',
+              doctorId: apt.doctorId || apt.doctor_id,
+              doctorName: item.doctor?.displayName || apt.doctor_name || 'Dr. Specialist',
+              doctorSpecialization: item.doctor?.specialization || apt.doctor_specialization || 'General Medicine',
+              appointmentType: (apt.consultationType || apt.appointment_type || 'video').toLowerCase(),
+              scheduledAt: apt.scheduledStart || apt.scheduled_at,
+              reason: apt.reason || 'General Consultation',
+              status: (apt.status || 'SCHEDULED').toUpperCase(),
+              meetStatus: item.googleMeet?.status || apt.meet_status || 'SCHEDULED',
+              googleMeetingUri: item.googleMeet?.meetingUri || apt.google_meeting_uri,
+              googleMeetingCode: item.googleMeet?.meetingCode || apt.google_meeting_code,
+              googleSpaceName: item.googleMeet?.spaceName || apt.google_space_name,
+              consultationId: apt.consultationId || apt.consultation_id,
+            };
+          });
+          setAppointments(formatted);
+        }
+      } catch {
+        // Fallback to firestore list
+        const fsData = await listUserAppointmentsFirestore(user?.uid, userRole);
+        if (fsData && fsData.length > 0) {
+          setAppointments(fsData.map(a => ({
+            id: a.id,
+            patientId: a.patientId,
+            patientName: a.patientName || 'Patient',
+            doctorId: a.doctorId,
+            doctorName: a.doctorName || 'Dr. Specialist',
+            doctorSpecialization: a.doctorSpecialization || 'General Medicine',
+            appointmentType: (a.consultationType || 'video').toLowerCase(),
+            scheduledAt: a.scheduledStart?.toDate ? a.scheduledStart.toDate().toISOString() : a.scheduledStart,
+            reason: a.reason || 'General Consultation',
+            status: (a.status || 'SCHEDULED').toUpperCase(),
+            meetStatus: a.meetStatus || 'SCHEDULED',
+            googleMeetingUri: a.googleMeetingUri,
+            googleMeetingCode: a.googleMeetingCode,
+            googleSpaceName: a.googleSpaceName,
+            consultationId: a.consultationId,
+          })));
+        }
       }
     } catch (err) {
       toastError(err?.response?.data?.detail || err?.message || 'Failed to book appointment.', 'Booking Failed');

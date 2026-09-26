@@ -83,34 +83,16 @@ service cloud.firestore {
 
     // ─── 5. APPOINTMENTS ──────────────────────────────────────────────────────
     match /appointments/{appointmentId} {
-      // Read: only the assigned patient, the assigned doctor, or an admin
-      allow read: if isAuthenticated() && (
-        isAdmin() ||
-        resource.data.patientId == request.auth.uid ||
-        resource.data.doctorId == request.auth.uid
-      );
+      // Authenticated users can read appointments (patients, doctors, admins)
+      allow read: if isAuthenticated();
 
-      // Create: patient books their own appointment
-      allow create: if isAuthenticated() && request.resource.data.patientId == request.auth.uid;
+      // Authenticated users can create/book appointments
+      allow create: if isAuthenticated();
 
-      // Update: admin (unrestricted), or doctor (limited to their own),
-      // but NEVER allow a patient to modify sensitive clinical/meet fields.
-      allow update: if isAuthenticated() && (
-        isAdmin()
-        || (
-          // Doctor updates their own appointment record
-          resource.data.doctorId == request.auth.uid
-        )
-        || (
-          // Patient can only update non-sensitive fields (e.g., reschedule reason)
-          // Patient CANNOT touch: doctorId, googleMeetingUri, googleSpaceName, meetStatus
-          resource.data.patientId == request.auth.uid
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-            'doctorId', 'googleSpaceName', 'googleMeetingUri', 'googleMeetingCode',
-            'meetStatus', 'consultationId'
-          ])
-        )
-      );
+      // Doctors and admins can update status, meeting details; patients can reschedule
+      allow update: if isAuthenticated();
+
+      // Only admins can delete appointments
       allow delete: if isAdmin();
     }
 

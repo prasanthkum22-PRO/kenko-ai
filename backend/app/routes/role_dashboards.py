@@ -54,6 +54,14 @@ def get_doctor_workspace(db: Session = Depends(get_db)):
         .filter(FollowUp.status == "CONFIRMED")
         .count()
     )
+
+    scheduled_appointments = (
+        db.query(Appointment)
+        .filter(Appointment.status.in_(["scheduled", "confirmed", "in_progress", "SCHEDULED"]))
+        .order_by(Appointment.scheduled_at.asc())
+        .limit(10)
+        .all()
+    )
     
     recent_consultations = (
         db.query(Consultation)
@@ -69,8 +77,27 @@ def get_doctor_workspace(db: Session = Depends(get_db)):
             "finalized_records": finalized_count,
             "pending_followups": pending_followups,
             "confirmed_followups": confirmed_followups,
+            "scheduled_appointments": len(scheduled_appointments),
             "active_patients": db.query(Consultation.patient_id).distinct().count(),
         },
+        "scheduled_appointments": [
+            {
+                "id": a.id,
+                "patient_id": a.patient_id,
+                "patient_name": a.patient_name,
+                "doctor_id": a.doctor_id,
+                "doctor_name": a.doctor_name,
+                "doctor_specialization": a.doctor_specialization,
+                "appointment_type": a.appointment_type,
+                "scheduled_at": a.scheduled_at.isoformat() if a.scheduled_at else None,
+                "reason": a.reason,
+                "status": a.status,
+                "meet_status": a.meet_status,
+                "google_meeting_uri": a.google_meeting_uri,
+                "google_meeting_code": a.google_meeting_code,
+            }
+            for a in scheduled_appointments
+        ],
         "recent_consultations": [
             {
                 "id": c.id,
