@@ -21,6 +21,8 @@ import {
   listenToUserAppointmentsFirestore,
   cancelAppointmentFirestore,
   updateAppointmentFirestore,
+  acceptAppointmentFirestore,
+  declineAppointmentFirestore,
   getVerifiedDoctorsFirestore,
 } from '../services/firestoreService';
 import {
@@ -500,16 +502,61 @@ export default function AppointmentsPage() {
     }
   };
 
+  // Handle Accept Appointment (Doctor only)
+  const handleAcceptAppointment = async (appointmentId) => {
+    setActionLoading(true);
+    try {
+      const res = await acceptAppointmentFirestore(appointmentId);
+      success('Appointment accepted! Google Meet link generated and synced to patient.', 'Appointment Confirmed');
+      setAppointments(prev =>
+        prev.map(a => a.id === appointmentId ? {
+          ...a,
+          status: 'CONFIRMED',
+          meetStatus: 'READY',
+          googleMeetingUri: res.googleMeetingUri,
+          googleMeetingCode: res.googleMeetingCode,
+        } : a)
+      );
+    } catch (err) {
+      toastError(err?.message || 'Failed to accept appointment.', 'Error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Handle Decline Appointment (Doctor only)
+  const handleDeclineAppointment = async (appointmentId) => {
+    if (!window.confirm('Are you sure you want to decline this appointment request?')) return;
+    setActionLoading(true);
+    try {
+      await declineAppointmentFirestore(appointmentId, 'Declined by doctor');
+      success('Appointment declined.', 'Status Updated');
+      setAppointments(prev =>
+        prev.map(a => a.id === appointmentId ? { ...a, status: 'DECLINED', meetStatus: 'CANCELLED' } : a)
+      );
+    } catch (err) {
+      toastError(err?.message || 'Failed to decline appointment.', 'Error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   // Launch Google Meet / Video Consultation Room
   const handleJoinVideoConsultation = async (apt) => {
     if (apt.appointmentType !== 'video') return;
+
+    // If Google Meeting URI exists, open it directly in a new tab if requested, or telehealth workspace
+    if (apt.googleMeetingUri) {
+      window.open(apt.googleMeetingUri, '_blank', 'noopener,noreferrer');
+      return;
+    }
 
     // If doctor and no Google Meet Space exists yet, create it
     if ((isDoctor || isAdmin) && (!apt.googleMeetingUri || apt.meetStatus === 'NOT_CREATED')) {
       try {
         const meetRes = await createAppointmentMeet(apt.id);
         if (meetRes?.meetingUri) {
-          navigate(`/consultations/video?appointmentId=${apt.id}`);
+          window.open(meetRes.meetingUri, '_blank', 'noopener,noreferrer');
           return;
         }
       } catch (err) {
@@ -788,8 +835,8 @@ export default function AppointmentsPage() {
                 </div>
 
                 {/* Card Actions */}
-                <div className="pt-3 border-t border-border/40 flex items-center justify-between gap-2 mt-2">
-                  <div className="flex items-center gap-2">
+                <div className="pt-3 border-t border-border/40 flex flex-wrap items-center justify-between gap-2 mt-2">
+                  <div className="flex items-center flex-wrap gap-2">
                     <button
                       onClick={() => setSelectedAppointment(apt)}
                       className="btn btn-secondary text-xs py-1.5 px-3"
@@ -797,7 +844,26 @@ export default function AppointmentsPage() {
                       Details
                     </button>
 
-                    {!isCancelled && !isCompleted && (
+                    {isDoctor && (apt.status === 'SCHEDULED' || apt.status === 'PENDING' || apt.status === 'REQUESTED') && (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleAcceptAppointment(apt.id)}
+                          className="btn btn-success text-xs py-1.5 px-2.5 font-bold flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white"
+                          title="Accept and create Google Meet link"
+                        >
+                          <IconBadgeCheck size={13} /> Accept
+                        </button>
+                        <button
+                          onClick={() => handleDeclineAppointment(apt.id)}
+                          className="btn btn-ghost text-xs py-1.5 px-2 text-rose-400 hover:bg-rose-500/10 border border-rose-500/30"
+                          title="Decline appointment"
+                        >
+                          ✕ Decline
+                        </button>
+                      </div>
+                    )}
+
+                    {!isCancelled && !isCompleted && !isDoctor && (
                       <button
                         onClick={() => {
                           setSelectedAppointment(apt);
@@ -822,7 +888,7 @@ export default function AppointmentsPage() {
                       className="btn btn-primary text-xs py-1.5 px-3.5 flex items-center gap-1.5 shadow-sm shadow-primary/20"
                     >
                       <IconVideo size={14} />
-                      <span>{isDoctor ? 'Start Meet' : 'Join Video'}</span>
+                      <span>{apt.googleMeetingUri ? '📹 Join Google Meet' : isDoctor ? 'Start Meet' : 'Join Video'}</span>
                     </button>
                   ) : !isCancelled && !isCompleted && !isVideo ? (
                     <button

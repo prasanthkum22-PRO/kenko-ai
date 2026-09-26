@@ -321,6 +321,41 @@ export const updateAppointmentFirestore = async (appointmentId, updates) => {
   });
 };
 
+export const acceptAppointmentFirestore = async (appointmentId, customMeetUri = null) => {
+  if (!appointmentId) return null;
+  const aptRef = doc(db, 'appointments', appointmentId);
+  const snap = await getDoc(aptRef);
+  const currentData = snap.exists() ? snap.data() : {};
+
+  const isVideo = (currentData.consultationType || currentData.appointment_type || 'video').toLowerCase() === 'video';
+  const meetingCode = isVideo ? `kenko-${appointmentId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3)}-${appointmentId.replace(/[^a-zA-Z0-9]/g, '').slice(3, 7)}-${appointmentId.replace(/[^a-zA-Z0-9]/g, '').slice(7, 10) || 'med'}` : '';
+  const meetingUri = customMeetUri || currentData.googleMeetingUri || (isVideo ? `https://meet.google.com/${meetingCode}` : '');
+
+  const updates = {
+    status: 'CONFIRMED',
+    meetStatus: isVideo ? 'READY' : 'NOT_APPLICABLE',
+    googleMeetingUri: meetingUri,
+    googleMeetingCode: meetingCode,
+    googleSpaceName: currentData.googleSpaceName || (isVideo ? `spaces/${meetingCode}` : ''),
+    acceptedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+
+  await updateDoc(aptRef, updates);
+  return { id: appointmentId, ...currentData, ...updates };
+};
+
+export const declineAppointmentFirestore = async (appointmentId, declineReason = 'Declined by doctor') => {
+  if (!appointmentId) return;
+  const aptRef = doc(db, 'appointments', appointmentId);
+  await updateDoc(aptRef, {
+    status: 'DECLINED',
+    declineReason,
+    meetStatus: 'CANCELLED',
+    updatedAt: serverTimestamp(),
+  });
+};
+
 export const cancelAppointmentFirestore = async (appointmentId, reason = 'Cancelled by user') => {
   if (!appointmentId) return;
   const aptRef = doc(db, 'appointments', appointmentId);

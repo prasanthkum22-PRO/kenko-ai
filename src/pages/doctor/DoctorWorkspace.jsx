@@ -190,16 +190,59 @@ export default function DoctorWorkspace() {
     }
   };
 
+  const handleAcceptAppointment = async (apt) => {
+    try {
+      const updated = await acceptAppointmentFirestore(apt.id);
+      setAppointments((prev) =>
+        prev.map((a) =>
+          a.id === apt.id
+            ? {
+                ...a,
+                status: 'CONFIRMED',
+                meetStatus: 'READY',
+                googleMeetingUri: updated?.googleMeetingUri || a.googleMeetingUri,
+                googleMeetingCode: updated?.googleMeetingCode || a.googleMeetingCode,
+              }
+            : a
+        )
+      );
+      success(
+        `Appointment for ${apt.patientName} accepted! Google Meet link generated and synced to patient.`,
+        'Appointment Confirmed'
+      );
+    } catch (err) {
+      toastError(err?.message || 'Failed to accept appointment.', 'Error');
+    }
+  };
+
+  const handleDeclineAppointment = async (apt) => {
+    if (!window.confirm(`Are you sure you want to decline the appointment request from ${apt.patientName}?`)) return;
+    try {
+      await declineAppointmentFirestore(apt.id, 'Declined by doctor');
+      setAppointments((prev) =>
+        prev.map((a) =>
+          a.id === apt.id ? { ...a, status: 'DECLINED', meetStatus: 'CANCELLED' } : a
+        )
+      );
+      success(`Appointment request from ${apt.patientName} has been declined.`, 'Declined');
+    } catch (err) {
+      toastError(err?.message || 'Failed to decline appointment.', 'Error');
+    }
+  };
+
   const metrics = workspace?.metrics || {};
   const pendingVerification = consultations.filter((c) => !c.is_approved).length;
   const pendingLab = labTasks.filter((l) => l.status !== 'Reviewed' && l.status !== 'Completed').length;
-  const scheduledCount = appointments.filter(
-    (a) => a.status !== 'CANCELLED' && a.status !== 'COMPLETED'
+  const pendingRequestsCount = appointments.filter(
+    (a) => a.status === 'SCHEDULED' || a.status === 'REQUESTED' || a.status === 'PENDING'
   ).length;
+  const confirmedCount = appointments.filter((a) => a.status === 'CONFIRMED').length;
 
   const filteredAppointments = appointments.filter((apt) => {
     const st = apt.status?.toUpperCase() || 'SCHEDULED';
-    if (appointmentFilter === 'upcoming') return st !== 'CANCELLED' && st !== 'COMPLETED';
+    if (appointmentFilter === 'requests') return st === 'SCHEDULED' || st === 'REQUESTED' || st === 'PENDING';
+    if (appointmentFilter === 'confirmed') return st === 'CONFIRMED';
+    if (appointmentFilter === 'upcoming') return st !== 'CANCELLED' && st !== 'DECLINED' && st !== 'COMPLETED';
     if (appointmentFilter === 'video') return apt.appointmentType === 'video';
     if (appointmentFilter === 'in_person') return apt.appointmentType === 'in_person';
     return true; // 'all'
@@ -239,7 +282,7 @@ export default function DoctorWorkspace() {
             Welcome, {user?.name || user?.displayName || 'Dr. Aarav Patel'}
           </h1>
           <p className="page-subtitle">
-            AI-assisted clinical workflow with verifiable SOAP summaries, patient appointment queues, and ambient speech capture.
+            Accept incoming patient appointment requests, generate Google Meet links, and conduct AI-assisted consultations.
           </p>
         </div>
 
@@ -265,29 +308,29 @@ export default function DoctorWorkspace() {
       </div>
 
       <div className="kpi-grid">
-        <div className="kpi-card">
-          <div className="kpi-icon">
+        <div className="kpi-card" style={{ borderLeft: '4px solid #f59e0b' }}>
+          <div className="kpi-icon" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>
+            <IconClock />
+          </div>
+          <span className="kpi-label">Pending Requests</span>
+          <span className="kpi-value" style={{ color: '#f59e0b' }}>{pendingRequestsCount}</span>
+          <span className="kpi-foot">Awaiting your approval</span>
+        </div>
+        <div className="kpi-card" style={{ borderLeft: '4px solid #10b981' }}>
+          <div className="kpi-icon" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981' }}>
             <IconCalendar />
           </div>
-          <span className="kpi-label">Patient Appointments</span>
-          <span className="kpi-value">{scheduledCount}</span>
-          <span className="kpi-foot">Upcoming &amp; active visits</span>
+          <span className="kpi-label">Confirmed Appointments</span>
+          <span className="kpi-value" style={{ color: '#10b981' }}>{confirmedCount}</span>
+          <span className="kpi-foot">Scheduled &amp; Google Meet ready</span>
         </div>
         <div className="kpi-card">
           <div className="kpi-icon">
             <IconStethoscope />
           </div>
-          <span className="kpi-label">Total consultations</span>
+          <span className="kpi-label">Total Consultations</span>
           <span className="kpi-value">{metrics.total_consultations || consultations.length || 0}</span>
-          <span className="kpi-foot">In-person &amp; video</span>
-        </div>
-        <div className="kpi-card">
-          <div className="kpi-icon">
-            <IconClock />
-          </div>
-          <span className="kpi-label">Pending verification</span>
-          <span className="kpi-value">{pendingVerification || metrics.pending_approval || 0}</span>
-          <span className="kpi-foot">Requires doctor review</span>
+          <span className="kpi-foot">In-person &amp; video visits</span>
         </div>
         <div className="kpi-card">
           <div className="kpi-icon">
@@ -300,26 +343,47 @@ export default function DoctorWorkspace() {
       </div>
 
       {/* ─── LIVE PATIENT APPOINTMENTS QUEUE ─── */}
-      <section className="section-card flex flex-col" id="doctor-appointments-queue">
+      <section className="section-card flex flex-col" id="doctor-appointments-queue" style={{ borderRadius: '16px' }}>
         <div className="section-card-header flex items-center justify-between flex-wrap gap-3">
           <div>
             <div className="flex items-center gap-2">
               <h2 className="section-card-title">Patient Appointments Queue</h2>
-              <span className="badge badge-primary">{filteredAppointments.length}</span>
+              {pendingRequestsCount > 0 && (
+                <span className="badge badge-warning font-bold" style={{ backgroundColor: '#f59e0b', color: '#fff' }}>
+                  {pendingRequestsCount} New Requests
+                </span>
+              )}
+              <span className="badge badge-primary">{filteredAppointments.length} Total</span>
             </div>
             <p className="card-subtitle">
-              Real-time patient bookings synced with Firebase Firestore and Google Meet
+              Accept patient requests to automatically generate Google Meet video links in real-time
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <div className="flex bg-slate-800/40 p-1 rounded-lg border border-slate-700/50 text-xs">
+              <button
+                className={`px-3 py-1 rounded-md font-medium transition-all ${
+                  appointmentFilter === 'requests' ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                }`}
+                onClick={() => setAppointmentFilter('requests')}
+              >
+                Requests ({pendingRequestsCount})
+              </button>
+              <button
+                className={`px-3 py-1 rounded-md font-medium transition-all ${
+                  appointmentFilter === 'confirmed' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                }`}
+                onClick={() => setAppointmentFilter('confirmed')}
+              >
+                Confirmed ({confirmedCount})
+              </button>
               <button
                 className={`px-3 py-1 rounded-md font-medium transition-all ${
                   appointmentFilter === 'upcoming' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'
                 }`}
                 onClick={() => setAppointmentFilter('upcoming')}
               >
-                Upcoming
+                All Upcoming
               </button>
               <button
                 className={`px-3 py-1 rounded-md font-medium transition-all ${
@@ -328,14 +392,6 @@ export default function DoctorWorkspace() {
                 onClick={() => setAppointmentFilter('video')}
               >
                 Video Telehealth
-              </button>
-              <button
-                className={`px-3 py-1 rounded-md font-medium transition-all ${
-                  appointmentFilter === 'in_person' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'
-                }`}
-                onClick={() => setAppointmentFilter('in_person')}
-              >
-                In-Person
               </button>
               <button
                 className={`px-3 py-1 rounded-md font-medium transition-all ${
@@ -358,12 +414,12 @@ export default function DoctorWorkspace() {
               <div className="empty-icon">
                 <IconCalendar />
               </div>
-              <h3 className="empty-title">No appointments found</h3>
+              <h3 className="empty-title">No appointments in this view</h3>
               <p className="empty-description">
-                Patient bookings from the portal or mobile app will appear here in real-time.
+                When patients book an appointment, requests will appear here instantly for approval.
               </p>
               <button className="btn btn-primary btn-sm" onClick={() => navigate('/appointments?action=book')}>
-                <IconPlus size={14} /> Book New Appointment
+                <IconPlus size={14} /> Book Test Appointment
               </button>
             </div>
           ) : (
@@ -372,19 +428,22 @@ export default function DoctorWorkspace() {
                 <thead>
                   <tr>
                     <th>Patient Name</th>
-                    <th>Visit Type</th>
-                    <th>Date &amp; Time</th>
+                    <th>Visit Mode</th>
+                    <th>Requested Date &amp; Time</th>
                     <th>Clinical Reason</th>
                     <th>Status</th>
-                    <th className="text-right">Actions</th>
+                    <th>Google Meet Link</th>
+                    <th className="text-right">Action / Approval</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredAppointments.map((apt) => {
                     const isVideo = apt.appointmentType === 'video';
-                    const isScheduled = apt.status === 'SCHEDULED' || apt.status === 'CONFIRMED';
+                    const isPendingApproval =
+                      apt.status === 'SCHEDULED' || apt.status === 'REQUESTED' || apt.status === 'PENDING';
+                    const isConfirmed = apt.status === 'CONFIRMED';
                     const isCompleted = apt.status === 'COMPLETED';
-                    const isCancelled = apt.status === 'CANCELLED';
+                    const isDeclined = apt.status === 'DECLINED' || apt.status === 'CANCELLED';
 
                     let formattedDate = 'Scheduled';
                     if (apt.scheduledAt) {
@@ -408,7 +467,7 @@ export default function DoctorWorkspace() {
                           <div className="flex flex-col">
                             <span className="font-semibold text-sm">{apt.patientName}</span>
                             <span className="text-muted text-xs">
-                              {apt.patientAge ? `${apt.patientAge}y` : ''} {apt.patientGender || ''}
+                              {apt.patientAge ? `${apt.patientAge} yrs` : ''} {apt.patientGender || ''}
                             </span>
                           </div>
                         </td>
@@ -432,43 +491,104 @@ export default function DoctorWorkspace() {
                         <td>
                           <span
                             className={`badge ${
-                              isCompleted
+                              isConfirmed
                                 ? 'badge-success'
-                                : isCancelled
-                                ? 'badge-secondary'
-                                : 'badge-primary'
+                                : isPendingApproval
+                                ? 'badge-warning'
+                                : isCompleted
+                                ? 'badge-primary'
+                                : 'badge-secondary'
                             }`}
+                            style={{ fontWeight: 700 }}
                           >
-                            {apt.status || 'SCHEDULED'}
+                            {isPendingApproval ? 'PENDING APPROVAL' : apt.status}
                           </span>
+                        </td>
+                        <td>
+                          {isVideo && apt.googleMeetingUri ? (
+                            <a
+                              href={apt.googleMeetingUri}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 underline"
+                              title={apt.googleMeetingUri}
+                            >
+                              <IconVideo size={12} /> Join Meet
+                            </a>
+                          ) : isVideo && isPendingApproval ? (
+                            <span className="text-[11px] text-muted italic">Generated on acceptance</span>
+                          ) : (
+                            <span className="text-[11px] text-muted">—</span>
+                          )}
                         </td>
                         <td className="text-right">
                           <div className="flex items-center justify-end gap-2">
-                            {isVideo ? (
-                              <button
-                                className="btn btn-primary btn-sm flex items-center gap-1"
-                                onClick={() => navigate(`/consultations/video?appointmentId=${apt.id}`)}
-                                title="Start Telehealth Video Consultation"
-                              >
-                                <IconVideo size={13} /> Launch Video
-                              </button>
+                            {/* Doctor Approval Action Buttons */}
+                            {isPendingApproval ? (
+                              <>
+                                <button
+                                  className="btn btn-sm btn-primary flex items-center gap-1"
+                                  style={{ backgroundColor: '#10b981', borderColor: '#10b981', color: '#fff' }}
+                                  onClick={() => handleAcceptAppointment(apt)}
+                                  title="Accept appointment and create Google Meet link"
+                                >
+                                  <IconCheck size={13} /> Accept
+                                </button>
+                                <button
+                                  className="btn btn-sm btn-ghost text-danger flex items-center gap-1"
+                                  style={{ color: '#ef4444' }}
+                                  onClick={() => handleDeclineAppointment(apt)}
+                                  title="Decline appointment request"
+                                >
+                                  ✕ Decline
+                                </button>
+                              </>
+                            ) : isConfirmed ? (
+                              <>
+                                {isVideo ? (
+                                  <>
+                                    <button
+                                      className="btn btn-primary btn-sm flex items-center gap-1"
+                                      onClick={() => {
+                                        if (apt.googleMeetingUri) {
+                                          window.open(apt.googleMeetingUri, '_blank');
+                                        } else {
+                                          navigate(`/consultations/video?appointmentId=${apt.id}`);
+                                        }
+                                      }}
+                                      title="Open Google Meet Telehealth Video"
+                                    >
+                                      <IconVideo size={13} /> Join Meet
+                                    </button>
+                                    <button
+                                      className="btn btn-secondary btn-sm flex items-center gap-1"
+                                      onClick={() => navigate(`/consultations/video?appointmentId=${apt.id}`)}
+                                      title="Open Telehealth Workspace"
+                                    >
+                                      Workspace
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    className="btn btn-secondary btn-sm flex items-center gap-1"
+                                    onClick={() => navigate(`/consultations/in-person?appointmentId=${apt.id}`)}
+                                    title="Start In-Person Ambient Recording"
+                                  >
+                                    <IconMic size={13} /> Ambient Visit
+                                  </button>
+                                )}
+                                <button
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() => handleStatusChange(apt.id, 'COMPLETED')}
+                                  title="Mark as Completed"
+                                >
+                                  <IconCheck size={14} className="text-emerald-400" />
+                                </button>
+                              </>
                             ) : (
-                              <button
-                                className="btn btn-secondary btn-sm flex items-center gap-1"
-                                onClick={() => navigate(`/consultations/in-person?appointmentId=${apt.id}`)}
-                                title="Start In-Person Ambient Recording"
-                              >
-                                <IconMic size={13} /> Ambient Visit
-                              </button>
-                            )}
-                            {isScheduled && (
-                              <button
-                                className="btn btn-ghost btn-sm"
-                                onClick={() => handleStatusChange(apt.id, 'COMPLETED')}
-                                title="Mark as Completed"
-                              >
-                                <IconCheck size={14} className="text-emerald-400" />
-                              </button>
+                              <span className="text-xs text-muted">
+                                {isCompleted ? 'Completed' : isDeclined ? 'Declined' : apt.status}
+                              </span>
                             )}
                           </div>
                         </td>
