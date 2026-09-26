@@ -10,6 +10,7 @@ from app.routes.meet_routes import router as meet_router
 from app.routes.transcription_routes import router as transcription_router
 from app.routes.doctor_routes import router as doctor_router
 from app.routes.clinical_workspace import router as clinical_workspace_router
+from app.routes.appointment_routes import router as appointment_router
 
 __all__ = [
     "auth_router",
@@ -24,5 +25,6 @@ __all__ = [
     "transcription_router",
     "doctor_router",
     "clinical_workspace_router",
+    "appointment_router",
 ]
 

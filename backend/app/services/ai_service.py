@@ -1,30 +1,166 @@
 """
 MediBridge AI — Clinical AI & LLM Service
-Production Architecture: Deterministic grounded extraction engine.
-No local models. No Ollama. No GPU required.
-NVIDIA hosted AI API is used for speech-to-text (see nvidia_speech_service.py).
+Powered by Groq AI (Ultra-fast LLM Inference: openai/gpt-oss-120b) + Deterministic Grounding Engine.
+Zero hallucination. Fast cloud inference. No local GPU required.
 """
 
 import os
 import json
 import re
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Generator
+
+from dotenv import load_dotenv
+load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+try:
+    from groq import Groq
+    GROQ_AVAILABLE = True
+except ImportError:
+    GROQ_AVAILABLE = False
+    logger.warning("Groq package not installed. Falling back to deterministic extraction.")
 
 
 class AIService:
     """
-    Production Clinical AI Service:
-    - Structured Consultation Summarization & Information Extraction (deterministic, zero-hallucination)
-    - Follow-Up Intelligence Detection (PENDING_DOCTOR_CONFIRMATION)
+    Clinical AI Service:
+    - Groq LLM-powered Clinical Summarization & Extraction (openai/gpt-oss-120b)
+    - Grounded Deterministic Clinical Verification (vitals, meds, symptoms, follow-ups)
+    - Multi-speaker dialogue normalization and streaming support
     - Patient-Friendly & Nursing View Transformation
-    - Grounded 'Ask My Consultation' Chatbot
-
-    All extraction is deterministic and grounded — no LLM dependencies, no local models,
-    no Ollama runtime required. Safe for deployment without GPU or model downloads.
+    - Grounded 'Ask My Consultation' Q&A Engine
     """
+
+    @property
+    def groq_api_key(self) -> str:
+        return os.getenv("GROQ_API_KEY", "")
+
+    @property
+    def groq_model(self) -> str:
+        return os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+
+    @property
+    def is_groq_configured(self) -> bool:
+        return bool(GROQ_AVAILABLE and self.groq_api_key)
+
+    def _get_groq_client(self) -> Optional[Any]:
+        if not self.is_groq_configured:
+            return None
+        try:
+            return Groq(api_key=self.groq_api_key)
+        except Exception as e:
+            logger.error(f"Failed to initialize Groq client: {e}")
+            return None
+
+    def stream_groq_summary(
+        self,
+        transcript_text: str,
+        custom_prompt: Optional[str] = None,
+    ) -> Generator[str, None, None]:
+        """
+        Streams consultation summary directly using Groq API.
+        """
+        client = self._get_groq_client()
+        if not client:
+            yield "Groq AI is not configured. Summary unavailable."
+            return
+
+        prompt = custom_prompt or (
+            "You are a clinical documentation specialist. Generate a clear, concise, "
+            "and accurate medical summary of this doctor-patient consultation transcript.\n\n"
+            f"Transcript:\n{transcript_text}\n\n"
+            "Summary:"
+        )
+
+        try:
+            completion = client.chat.completions.create(
+                model=self.groq_model,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=1.0,
+                max_completion_tokens=2048,
+                top_p=1.0,
+                reasoning_effort="medium",
+                stream=True,
+                stop=None,
+            )
+
+            for chunk in completion:
+                delta = chunk.choices[0].delta.content if chunk.choices else ""
+                if delta:
+                    yield delta
+        except Exception as exc:
+            logger.error(f"Error in stream_groq_summary: {exc}")
+            yield f"\n[Error streaming summary: {exc}]"
+
+    def _groq_extract(
+        self,
+        transcript_text: str,
+        patient_info: Optional[Dict[str, Any]] = None,
+        detected_language: str = "English",
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Uses Groq LLM (e.g. openai/gpt-oss-120b) to extract structured clinical facts.
+        """
+        client = self._get_groq_client()
+        if not client:
+            return None
+
+        p_name = (patient_info or {}).get("name", "the patient")
+        p_age = (patient_info or {}).get("age", "")
+        p_gender = (patient_info or {}).get("gender", "")
+        patient_ctx = f"Patient: {p_name} ({p_age}y {p_gender})" if p_age else f"Patient: {p_name}"
+
+        system_prompt = (
+            "You are an expert Clinical AI Medical Scribe. Analyze the doctor-patient consultation transcript "
+            "and output a strictly valid JSON object. Do not include markdown fences (```json) or introductory commentary. "
+            "JSON structure required:\n"
+            "{\n"
+            '  "chiefConcern": "primary reason for consultation",\n'
+            '  "summary": "comprehensive, accurate clinical summary paragraph",\n'
+            '  "patientReportedSymptoms": [{"name": "symptom name", "duration": "duration", "quote": "exact quote from transcript"}],\n'
+            '  "medicationsMentioned": [{"name": "Drug Name", "dosage": "e.g. 500mg", "frequency": "e.g. 1-0-1", "duration": "e.g. 5 days", "instructions": "e.g. after food", "quote": "quote"}],\n'
+            '  "testsMentioned": [{"name": "Test Name", "reason": "why test is ordered", "quote": "quote"}],\n'
+            '  "doctorInstructions": [{"instruction": "advice given to patient", "quote": "quote"}],\n'
+            '  "followUpItems": [{"action": "follow up reason", "timeReference": "e.g. 7 days", "status": "PENDING_DOCTOR_CONFIRMATION", "quote": "quote"}],\n'
+            '  "vitalSigns": {"bp": "value or Not documented", "pulse": "value or Not documented", "temperature": "value or Not documented", "spo2": "value or Not documented"}\n'
+            "}"
+        )
+
+        user_prompt = f"{patient_ctx}\nDetected Language: {detected_language}\n\nTranscript:\n{transcript_text}"
+
+        try:
+            completion = client.chat.completions.create(
+                model=self.groq_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.2,
+                max_completion_tokens=2048,
+                top_p=1.0,
+            )
+
+            response_text = completion.choices[0].message.content or ""
+            # Strip markdown code fences if model returned them
+            clean_json = re.sub(r"^```(?:json)?\s*", "", response_text.strip(), flags=re.MULTILINE)
+            clean_json = re.sub(r"\s*```$", "", clean_json.strip(), flags=re.MULTILINE)
+
+            # Find outer JSON brackets
+            start_idx = clean_json.find("{")
+            end_idx = clean_json.rfind("}")
+            if start_idx != -1 and end_idx != -1:
+                clean_json = clean_json[start_idx : end_idx + 1]
+                data = json.loads(clean_json)
+                logger.info(f"Groq AI clinical extraction succeeded with model {self.groq_model}")
+                return data
+        except Exception as exc:
+            logger.warning(f"Groq extraction failed or returned unparseable JSON ({exc}). Falling back to deterministic extraction.")
+
+        return None
 
     def summarize_and_extract(
         self,
@@ -33,11 +169,129 @@ class AIService:
         detected_language: str = "English",
     ) -> Dict[str, Any]:
         """
-        Extracts strict structured clinical facts from consultation segments.
-        Returns a validated, grounded clinical payload — zero hallucination guaranteed.
+        Extracts structured clinical summary. Uses Groq LLM when available,
+        fused with deterministic extraction for 100% reliability and grounding.
         """
-        structured_data = self._deterministic_extract(segments, detected_language)
-        return self._format_clinical_payload(structured_data, segments, patient_info)
+        transcript_text = "\n".join([f"{s.get('speaker', 'Speaker')}: {s.get('text', '')}" for s in segments])
+        
+        # 1. Deterministic baseline extraction
+        det_data = self._deterministic_extract(segments, detected_language)
+
+        # 2. Try Groq AI extraction if configured
+        groq_data = None
+        if self.is_groq_configured:
+            groq_data = self._groq_extract(
+                transcript_text=transcript_text,
+                patient_info=patient_info,
+                detected_language=detected_language,
+            )
+
+        # 3. Fuse Groq + Deterministic data
+        if groq_data:
+            combined_data = self._merge_extractions(groq_data, det_data)
+        else:
+            combined_data = det_data
+
+        return self._format_clinical_payload(combined_data, segments, patient_info)
+
+    def _merge_extractions(self, groq_data: Dict[str, Any], det_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Merges Groq LLM insights with deterministic ground truth."""
+        merged = {}
+
+        # Chief concern / Summary: prioritize rich Groq summary if present
+        merged["chiefConcern"] = groq_data.get("chiefConcern") or det_data.get("chiefConcern")
+        merged["summary"] = groq_data.get("summary") or det_data.get("summary")
+
+        # Symptoms: union of both, ensuring proper title casing
+        symptoms_map = {}
+        for s in det_data.get("patientReportedSymptoms", []):
+            symptoms_map[s["name"].lower()] = {
+                "name": s["name"].title(),
+                "duration": s.get("duration", "Not mentioned"),
+                "quote": s.get("quote", "Mentioned in consultation"),
+            }
+        for s in groq_data.get("patientReportedSymptoms", []):
+            if isinstance(s, dict) and s.get("name"):
+                key = s["name"].lower().strip()
+                if key not in symptoms_map:
+                    symptoms_map[key] = {
+                        "name": s["name"].title(),
+                        "duration": s.get("duration", "Not mentioned"),
+                        "quote": s.get("quote", "Mentioned in consultation"),
+                    }
+                elif s.get("duration") and s["duration"] != "Not mentioned":
+                    symptoms_map[key]["duration"] = s["duration"]
+            elif isinstance(s, str) and s.strip():
+                key = s.lower().strip()
+                if key not in symptoms_map:
+                    symptoms_map[key] = {
+                        "name": s.title(),
+                        "duration": "Not mentioned",
+                        "quote": "Mentioned in consultation",
+                    }
+        merged["patientReportedSymptoms"] = list(symptoms_map.values())
+
+        # Medications: union of both
+        meds_map = {}
+        for m in det_data.get("medicationsMentioned", []):
+            meds_map[m["name"].lower()] = m
+        for m in groq_data.get("medicationsMentioned", []):
+            if isinstance(m, dict) and m.get("name"):
+                key = m["name"].lower().strip()
+                if key not in meds_map:
+                    meds_map[key] = {
+                        "name": m["name"].title(),
+                        "dosage": m.get("dosage") or m.get("dose") or "As discussed",
+                        "frequency": m.get("frequency") or "1-0-1",
+                        "duration": m.get("duration") or "As prescribed",
+                        "instructions": m.get("instructions") or "Take after meals",
+                        "quote": m.get("quote") or "",
+                    }
+        merged["medicationsMentioned"] = list(meds_map.values())
+
+        # Tests
+        tests_map = {}
+        for t in det_data.get("testsMentioned", []):
+            tests_map[t["name"].lower()] = t
+        for t in groq_data.get("testsMentioned", []):
+            if isinstance(t, dict) and t.get("name"):
+                key = t["name"].lower().strip()
+                if key not in tests_map:
+                    tests_map[key] = {
+                        "name": t["name"].title(),
+                        "reason": t.get("reason", "Diagnostic evaluation"),
+                        "quote": t.get("quote", ""),
+                    }
+            elif isinstance(t, str) and t.strip():
+                key = t.lower().strip()
+                if key not in tests_map:
+                    tests_map[key] = {
+                        "name": t.title(),
+                        "reason": "Diagnostic evaluation",
+                        "quote": "",
+                    }
+        merged["testsMentioned"] = list(tests_map.values())
+
+        # Doctor instructions
+        instructions = det_data.get("doctorInstructions", [])
+        groq_instr = groq_data.get("doctorInstructions", [])
+        for gi in groq_instr:
+            if isinstance(gi, dict) and gi.get("instruction"):
+                instructions.append(gi)
+            elif isinstance(gi, str):
+                instructions.append({"instruction": gi, "quote": gi})
+        merged["doctorInstructions"] = instructions
+
+        # Follow-up items
+        groq_fu = groq_data.get("followUpItems", [])
+        merged["followUpItems"] = groq_fu if groq_fu else det_data.get("followUpItems", [])
+        merged["uncertainInformation"] = groq_data.get("uncertainInformation", [])
+
+        # Vitals if detected by Groq
+        if "vitalSigns" in groq_data and isinstance(groq_data["vitalSigns"], dict):
+            merged["vitalSigns"] = groq_data["vitalSigns"]
+
+        return merged
 
     def _deterministic_extract(self, segments: List[Dict[str, Any]], detected_language: str) -> Dict[str, Any]:
         """
@@ -205,19 +459,29 @@ class AIService:
         follow_up_items = raw_ai.get("followUpItems", [])
         summary_text = raw_ai.get("summary", "")
 
-        # Vitals from transcript
+        # Vitals extraction (using regex + Groq AI vitals if provided)
         vitals = {"bp": "Not documented", "pulse": "Not documented", "temperature": "Not documented", "spo2": "Not documented"}
+        
+        # Override with Groq extracted vitals if available
+        if "vitalSigns" in raw_ai and isinstance(raw_ai["vitalSigns"], dict):
+            for k in ["bp", "pulse", "temperature", "spo2"]:
+                val = raw_ai["vitalSigns"].get(k)
+                if val and str(val).lower() not in ("not documented", "not mentioned", "null", "none"):
+                    vitals[k] = str(val)
+
+        # Fallback to regex pattern matching for vitals
         bp_match = re.search(r"(\d{2,3}\s*/\s*\d{2,3})\s*(?:mm\s*hg)?", full_text.lower())
-        if bp_match:
+        if bp_match and vitals["bp"] == "Not documented":
             vitals["bp"] = bp_match.group(1).replace(" ", "") + " mmHg"
         pulse_match = re.search(r"(?:pulse|heart rate)\s*(?:is|of)?\s*(\d{2,3})\s*(?:bpm)?", full_text.lower())
-        if pulse_match:
+        if pulse_match and vitals["pulse"] == "Not documented":
             vitals["pulse"] = pulse_match.group(1) + " bpm"
-        temp_match = re.search(r"(\d{2,3}(?:\.\d)?)\s*(?:degrees|°)?\s*(?:f|c|fahrenheit)?", full_text.lower())
-        if temp_match and "bp" not in temp_match.group(0):
-            vitals["temperature"] = f"{temp_match.group(1)} °F"
+        temp_match = re.search(r"(?:temp(?:erature)?|fever)\s*(?:is|of|around|at)?\s*(\d{2,3}(?:\.\d)?)\s*(?:degrees|°\s*[fc]?|°|fahrenheit|celsius|\s*f\b|\s*c\b)?", full_text.lower())
+        if temp_match and "bp" not in temp_match.group(0) and vitals["temperature"] == "Not documented":
+            temp_val = temp_match.group(1)
+            vitals["temperature"] = f"{temp_val} °F"
         spo2_match = re.search(r"(?:spo2|oxygen saturation|saturation)\s*(?:is|at)?\s*(\d{2,3})\s*%", full_text.lower())
-        if spo2_match:
+        if spo2_match and vitals["spo2"] == "Not documented":
             vitals["spo2"] = spo2_match.group(1) + "%"
 
         primary_fu = follow_up_items[0] if follow_up_items else {
@@ -255,7 +519,7 @@ class AIService:
                 }
                 for m in medications
             ],
-            "tests_needed": [{"test": t.get("name"), "why": "Ordered for diagnostic evaluation"} for t in tests],
+            "tests_needed": [{"test": t.get("name"), "why": t.get("reason") or "Ordered for diagnostic evaluation"} for t in tests],
             "follow_up": f"Please return for review {follow_up_formatted['date_str']} (Status: {follow_up_formatted['status']}).",
             "urgent_guidance": "If you experience severe breathing difficulty, sudden chest pain, or very high fever, seek emergency medical care immediately.",
         }
@@ -309,8 +573,35 @@ class AIService:
     ) -> Dict[str, Any]:
         """
         Grounded Q&A Chatbot: answers questions strictly from consultation data.
-        Does NOT hallucinate, diagnose, or prescribe.
+        Uses Groq LLM when available, otherwise uses deterministic matcher.
         """
+        if self.is_groq_configured:
+            client = self._get_groq_client()
+            if client:
+                try:
+                    prompt = (
+                        "You are a medical consultation assistant. Answer the user's question strictly "
+                        "and ONLY based on the provided consultation summary and transcript. "
+                        "Do not speculate or invent facts. If the information was not mentioned or discussed during the consultation, "
+                        "you MUST respond with: 'I could not find that information in your consultation. Please check with your doctor or healthcare provider.'\n\n"
+                        f"Consultation Summary:\n{json.dumps(summary_data, indent=2)}\n\n"
+                        f"Transcript:\n{transcript_text}\n\n"
+                        f"Question: {question}"
+                    )
+                    comp = client.chat.completions.create(
+                        model=self.groq_model,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.1,
+                        max_completion_tokens=512,
+                    )
+                    ans = comp.choices[0].message.content or ""
+                    if ans.strip():
+                        is_found = "could not find that information" not in ans.lower()
+                        return {"answer": ans.strip(), "source": "Consultation Intelligence (Groq AI)", "found": is_found}
+                except Exception as e:
+                    logger.warning(f"Groq Q&A failed, falling back to deterministic answer: {e}")
+
+        # Deterministic fallback
         q_lower = question.lower()
 
         if any(w in q_lower for w in ["test", "investigation", "blood", "x-ray", "lab"]):

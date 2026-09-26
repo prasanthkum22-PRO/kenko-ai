@@ -43,13 +43,16 @@ class Consultation(Base):
     __tablename__ = "consultations"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
+    appointment_id = Column(String(36), nullable=True, index=True)
     consultation_type = Column(String(20), default="in_person")  # 'video' | 'in_person'
     patient_id = Column(String(64), nullable=False, index=True)
     patient_name = Column(String(128), nullable=False)
     patient_age = Column(Integer, nullable=True)
     patient_gender = Column(String(16), nullable=True)
-    doctor_id = Column(String(64), nullable=True)
+    patient_language = Column(String(64), default="English")
+    doctor_id = Column(String(64), nullable=True, index=True)
     doctor_name = Column(String(128), default="Dr. Aarav Patel")
+    doctor_specialization = Column(String(128), default="General Medicine")
     status = Column(
         String(32), default="recording"
     )  # 'recording', 'processing', 'transcript_ready', 'summary_ready', 'doctor_reviewed', 'finalized'
@@ -67,11 +70,13 @@ class Consultation(Base):
     google_oauth_user_id = Column(String(128), nullable=True)
     meeting_status = Column(
         String(64), default="scheduled"
-    )  # 'scheduled', 'waiting_for_participants', 'meeting_active', 'meeting_ended', 'processing_transcript', 'transcript_ready', 'transcript_unavailable', 'error'
+    )  # 'SCHEDULED', 'MEET_CREATING', 'MEET_READY', 'MEET_CREATION_FAILED', 'IN_PROGRESS', 'COMPLETED', 'waiting_for_participants', 'meeting_active', 'meeting_ended', 'transcript_ready'
     transcript_status = Column(
         String(64), default="pending"
-    )  # 'pending', 'processing', 'ready', 'unavailable'
+    )  # 'pending', 'processing', 'ready', 'unavailable', 'failed'
     transcript_resource_name = Column(String(256), nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
     transcript_started_at = Column(DateTime, nullable=True)
     transcript_ended_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -116,6 +121,8 @@ class TranscriptSegment(Base):
         String(36), ForeignKey("consultations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     speaker = Column(String(32), default="Doctor")  # 'Doctor', 'Patient', 'Nurse', 'Other'
+    speaker_role = Column(String(32), default="UNKNOWN")  # 'DOCTOR', 'PATIENT', 'UNKNOWN'
+    participant_resource_name = Column(String(256), nullable=True)
     start_time = Column(Float, default=0.0)  # in seconds
     end_time = Column(Float, default=0.0)    # in seconds
     text = Column(Text, nullable=False)
@@ -281,12 +288,33 @@ class Appointment(Base):
     id = Column(String(36), primary_key=True, default=generate_uuid)
     patient_id = Column(String(64), nullable=False, index=True)
     patient_name = Column(String(128), nullable=False)
+    patient_age = Column(Integer, nullable=True)
+    patient_gender = Column(String(16), nullable=True)
+    patient_language = Column(String(64), default="English")
+    doctor_id = Column(String(64), nullable=True, index=True)
     doctor_name = Column(String(128), default="Dr. Aarav Patel")
-    appointment_type = Column(String(32), default="in_person")  # 'in_person' | 'video'
-    scheduled_at = Column(DateTime, nullable=False)
-    reason = Column(String(256), default="Follow-up consultation")
-    status = Column(String(32), default="scheduled")  # 'scheduled', 'completed', 'cancelled'
+    doctor_specialization = Column(String(128), default="General Medicine")
+    appointment_type = Column(String(32), default="video")  # 'in_person' | 'video'
+    scheduled_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    scheduled_end = Column(DateTime, nullable=True)
+    reason = Column(String(256), default="Video Consultation")
+    status = Column(String(32), default="scheduled")  # 'scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled'
+    
+    # Google Meet official v2 fields
+    google_space_name = Column(String(256), nullable=True)
+    google_meeting_uri = Column(String(512), nullable=True)
+    google_meeting_code = Column(String(64), nullable=True)
+    meet_status = Column(
+        String(64), default="SCHEDULED"
+    )  # 'SCHEDULED', 'MEET_CREATING', 'MEET_READY', 'MEET_CREATION_FAILED', 'IN_PROGRESS', 'COMPLETED'
+    
+    consultation_id = Column(String(36), nullable=True, index=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class Notification(Base):

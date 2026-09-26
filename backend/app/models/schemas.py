@@ -4,7 +4,7 @@ MediBridge AI — Pydantic Request & Response Schemas
 
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # ── Auth Schemas ───────────────────────────────────────────────
@@ -120,16 +120,65 @@ class FinalizeSummaryRequest(BaseModel):
     approved_by: str = "Dr. Aarav Patel"
 
 
+# ── Appointment Schemas ───────────────────────────────────────
+
+class CreateAppointmentRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    
+    patient_id: Optional[str] = Field(None, alias="patientId")
+    patient_name: Optional[str] = Field(None, alias="patientName")
+    patient_age: Optional[int] = Field(None, alias="patientAge")
+    patient_gender: Optional[str] = Field(None, alias="patientGender")
+    patient_language: Optional[str] = Field("English", alias="patientLanguage")
+    doctor_id: Optional[str] = Field(None, alias="doctorId")
+    doctor_name: Optional[str] = Field("Dr. Aarav Patel", alias="doctorName")
+    doctor_specialization: Optional[str] = Field("General Medicine", alias="doctorSpecialization")
+    appointment_type: str = Field("video", alias="appointmentType")  # 'video' | 'in_person'
+    scheduled_at: Optional[datetime] = Field(None, alias="scheduledAt")
+    reason: Optional[str] = "Video Consultation"
+
+
+class AppointmentResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    patient_id: Optional[str] = None
+    patient_name: Optional[str] = None
+    patient_age: Optional[int] = None
+    patient_gender: Optional[str] = None
+    patient_language: Optional[str] = "English"
+    doctor_id: Optional[str] = None
+    doctor_name: Optional[str] = None
+    doctor_specialization: Optional[str] = "General Medicine"
+    appointment_type: str = "video"
+    scheduled_at: Optional[datetime] = None
+    scheduled_end: Optional[datetime] = None
+    reason: Optional[str] = "Video Consultation"
+    status: str = "scheduled"
+    google_space_name: Optional[str] = None
+    google_meeting_uri: Optional[str] = None
+    google_meeting_code: Optional[str] = None
+    meet_status: Optional[str] = "SCHEDULED"
+    consultation_id: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
 # ── Consultation Schemas ──────────────────────────────────────
 
 class CreateConsultationRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    appointment_id: Optional[str] = Field(None, alias="appointmentId")
     patient_id: str = "P-1002"
     patient_name: str = "Aarav Sharma"
     patient_age: Optional[int] = 38
     patient_gender: Optional[str] = "Male"
+    patient_language: Optional[str] = "English"
     doctor_id: Optional[str] = "D-101"
     doctor_name: str = "Dr. Aarav Patel"
-    consultation_type: str = "in_person"  # 'video' | 'in_person'
+    doctor_specialization: Optional[str] = "General Medicine"
+    consultation_type: str = "video"  # 'video' | 'in_person'
     has_consent: bool = True
     detected_language: Optional[str] = "English"
     transcript: Optional[str] = None
@@ -138,17 +187,23 @@ class CreateConsultationRequest(BaseModel):
 
 
 class ConsultationResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str
+    appointment_id: Optional[str] = None
     consultation_type: str
     patient_id: str
     patient_name: str
-    patient_age: Optional[int]
-    patient_gender: Optional[str]
+    patient_age: Optional[int] = None
+    patient_gender: Optional[str] = None
+    patient_language: Optional[str] = "English"
+    doctor_id: Optional[str] = None
     doctor_name: str
+    doctor_specialization: Optional[str] = "General Medicine"
     status: str
     detected_language: Optional[str] = "English"
-    duration_seconds: int
-    has_consent: bool
+    duration_seconds: int = 0
+    has_consent: bool = True
     is_demo: bool = False
     google_space_name: Optional[str] = None
     google_meeting_uri: Optional[str] = None
@@ -156,6 +211,8 @@ class ConsultationResponse(BaseModel):
     conference_record_name: Optional[str] = None
     meeting_status: Optional[str] = "scheduled"
     transcript_status: Optional[str] = "pending"
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     transcript_count: int = 0
@@ -179,28 +236,41 @@ class GoogleAuthStatusResponse(BaseModel):
     is_mock: bool = False
 
 
+class UpdateGoogleAccountRequest(BaseModel):
+    email: str
+
+
 class CreateGoogleMeetRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     consultationId: Optional[str] = Field(None, alias="consultationId")
     consultation_id: Optional[str] = None
+    appointmentId: Optional[str] = Field(None, alias="appointmentId")
+    appointment_id: Optional[str] = None
     patientId: Optional[str] = Field(None, alias="patientId")
     patient_id: Optional[str] = None
 
-    class Config:
-        populate_by_name = True
-
 
 class CreateGoogleMeetResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     success: bool
-    consultationId: str
+    consultationId: Optional[str] = None
+    appointmentId: Optional[str] = None
     spaceName: str
     meetingUri: str
     meetingCode: Optional[str] = None
+    meetStatus: Optional[str] = "MEET_READY"
     message: Optional[str] = None
 
 
 class GoogleMeetStatusResponse(BaseModel):
-    consultationId: str
+    model_config = ConfigDict(populate_by_name=True)
+
+    consultationId: Optional[str] = None
+    appointmentId: Optional[str] = None
     meetingStatus: str
+    meetStatus: Optional[str] = None
     transcriptStatus: str
     spaceName: Optional[str] = None
     meetingUri: Optional[str] = None
@@ -212,15 +282,22 @@ class GoogleMeetStatusResponse(BaseModel):
 
 
 class NormalizedTranscriptEntry(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     speakerRole: str = "UNKNOWN"  # DOCTOR, PATIENT, UNKNOWN
+    speaker: Optional[str] = None
     participantId: Optional[str] = None
     participantName: Optional[str] = None
+    participantResourceName: Optional[str] = None
     text: str
     startTime: Optional[str] = None
     endTime: Optional[str] = None
+    createdAt: Optional[str] = None
 
 
 class NormalizedTranscriptResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     consultationId: str
     entries: List[NormalizedTranscriptEntry]
     transcriptStatus: str

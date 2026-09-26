@@ -41,29 +41,33 @@ class GoogleMeetService:
         """
         Calls Google Meet REST API v2: POST https://meet.googleapis.com/v2/spaces
         Creates a durable Google Meet space for the consultation.
+
+        Returns dict with keys: name, meetingUri, meetingCode, config, isMock
+
+        If no valid access token is available (sandbox/demo mode), isMock=True
+        and a sandbox-format URI is returned so the app can transparently handle it.
+
+        If the Google API call fails with a real token, raises an exception —
+        we NEVER silently substitute a fake URI when real OAuth is configured.
         """
         access_token = await google_oauth_service.get_valid_access_token(user_id, db)
-        
-        # If running in mock/demo mode
+
+        # No access token → sandbox/mock mode only
         if not access_token or access_token.startswith("mock_"):
             meet_code = generate_meet_code()
             space_id = secrets.token_urlsafe(12)
             space_name = f"spaces/{space_id}"
             meeting_uri = f"https://meet.google.com/{meet_code}"
-            
-            logger.info(f"Created simulated Google Meet Space: {space_name} ({meeting_uri})")
+            logger.info(f"[GoogleMeet] No OAuth token — sandbox mode: {meeting_uri}")
             return {
                 "name": space_name,
                 "meetingUri": meeting_uri,
                 "meetingCode": meet_code,
-                "config": {
-                    "accessType": access_type,
-                    "entryPointAccess": "ALL",
-                },
+                "config": {"accessType": access_type, "entryPointAccess": "ALL"},
                 "isMock": True,
             }
 
-        # Real Google Meet API v2 call
+        # Real Google Meet REST API v2 call
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
@@ -82,34 +86,33 @@ class GoogleMeetService:
                 json=body,
             )
 
-            if resp.status_code not in (200, 201):
-                logger.error(f"Google Meet create space failed: {resp.status_code} - {resp.text}")
-                # Fallback to simulated code if live API reports permission / plan issues
-                meet_code = generate_meet_code()
-                space_name = f"spaces/gmeet-{secrets.token_hex(6)}"
-                return {
-                    "name": space_name,
-                    "meetingUri": f"https://meet.google.com/{meet_code}",
-                    "meetingCode": meet_code,
-                    "config": {"accessType": access_type},
-                    "isMock": True,
-                    "fallbackReason": resp.text,
-                }
+        if resp.status_code not in (200, 201):
+            # Log the error type but never log the full response body (may contain tokens)
+            logger.error(
+                f"[GoogleMeet] create_space failed: HTTP {resp.status_code} "
+                f"(user={user_id}). Check Google Workspace Meet API permissions and OAuth scopes."
+            )
+            # Raise — callers must handle this and return a proper FAILED status
+            raise RuntimeError(
+                f"Google Meet API returned HTTP {resp.status_code}. "
+                "Verify Meet API is enabled, OAuth scopes include meet.spaces.create, "
+                "and the authenticated account has Google Workspace access."
+            )
 
-            data = resp.json()
-            # Extract meeting code from meetingUri if not directly present
-            meeting_uri = data.get("meetingUri", "")
-            meeting_code = data.get("meetingCode")
-            if not meeting_code and meeting_uri:
-                meeting_code = meeting_uri.rstrip("/").split("/")[-1]
+        data = resp.json()
+        meeting_uri = data.get("meetingUri", "")
+        meeting_code = data.get("meetingCode")
+        if not meeting_code and meeting_uri:
+            meeting_code = meeting_uri.rstrip("/").split("/")[-1]
 
-            return {
-                "name": data.get("name"),
-                "meetingUri": meeting_uri,
-                "meetingCode": meeting_code,
-                "config": data.get("config", {}),
-                "isMock": False,
-            }
+        logger.info(f"[GoogleMeet] Space created: {data.get('name')} (user={user_id})")
+        return {
+            "name": data.get("name"),
+            "meetingUri": meeting_uri,
+            "meetingCode": meeting_code,
+            "config": data.get("config", {}),
+            "isMock": False,
+        }
 
     async def get_space(self, space_name: str, user_id: str, db: Session) -> Optional[Dict[str, Any]]:
         """Retrieves Google Meet space metadata: GET https://meet.googleapis.com/v2/{name=spaces/*}."""

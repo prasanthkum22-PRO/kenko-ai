@@ -83,34 +83,66 @@ service cloud.firestore {
 
     // ─── 5. APPOINTMENTS ──────────────────────────────────────────────────────
     match /appointments/{appointmentId} {
+      // Read: only the assigned patient, the assigned doctor, or an admin
       allow read: if isAuthenticated() && (
         isAdmin() ||
         resource.data.patientId == request.auth.uid ||
         resource.data.doctorId == request.auth.uid
       );
+
+      // Create: patient books their own appointment
       allow create: if isAuthenticated() && request.resource.data.patientId == request.auth.uid;
+
+      // Update: admin (unrestricted), or doctor (limited to their own),
+      // but NEVER allow a patient to modify sensitive clinical/meet fields.
       allow update: if isAuthenticated() && (
-        isAdmin() ||
-        resource.data.patientId == request.auth.uid ||
-        resource.data.doctorId == request.auth.uid
+        isAdmin()
+        || (
+          // Doctor updates their own appointment record
+          resource.data.doctorId == request.auth.uid
+        )
+        || (
+          // Patient can only update non-sensitive fields (e.g., reschedule reason)
+          // Patient CANNOT touch: doctorId, googleMeetingUri, googleSpaceName, meetStatus
+          resource.data.patientId == request.auth.uid
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'doctorId', 'googleSpaceName', 'googleMeetingUri', 'googleMeetingCode',
+            'meetStatus', 'consultationId'
+          ])
+        )
       );
       allow delete: if isAdmin();
     }
 
     // ─── 6. CONSULTATIONS ─────────────────────────────────────────────────────
     match /consultations/{consultationId} {
+      // Read: only the assigned patient or doctor — NOT all authenticated users
       allow read: if isAuthenticated() && (
         isAdmin() ||
         resource.data.patientId == request.auth.uid ||
         resource.data.doctorId == request.auth.uid
       );
+
+      // Create: backend service (doctor or admin) only
       allow create: if isDoctor() || isAdmin();
+
+      // Update: doctor or admin may update clinical fields freely.
+      // Patients may NOT update any consultation fields directly.
+      // All privileged writes (Meet metadata, transcript, status) go via backend only.
       allow update: if isDoctor() || isAdmin();
+
       allow delete: if isAdmin();
 
       // Subcollection: Transcript Entries
+      // Each entry: { speakerRole, text, startTime, endTime, participantResourceName }
+      // Read: only the assigned patient or doctor for this consultation
+      // Write: only the backend (doctor/admin role) — never the patient
       match /transcriptEntries/{entryId} {
-        allow read: if isAuthenticated();
+        allow read: if isAuthenticated() && (
+          isAdmin() ||
+          get(/databases/$(database)/documents/consultations/$(consultationId)).data.patientId == request.auth.uid ||
+          get(/databases/$(database)/documents/consultations/$(consultationId)).data.doctorId == request.auth.uid
+        );
         allow write: if isDoctor() || isAdmin();
       }
     }

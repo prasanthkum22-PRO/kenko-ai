@@ -12,7 +12,11 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.models.db_models import User
-from app.models.schemas import GoogleAuthUrlResponse, GoogleAuthStatusResponse
+from app.models.schemas import (
+    GoogleAuthUrlResponse,
+    GoogleAuthStatusResponse,
+    UpdateGoogleAccountRequest,
+)
 from app.utils.auth import get_current_user, require_authenticated_user
 from app.services.google_oauth_service import google_oauth_service
 
@@ -93,6 +97,23 @@ def get_google_connection_status(
         expires_at=status_info.get("expires_at"),
         is_mock=status_info.get("is_mock", False),
     )
+
+
+@router.post("/account", summary="Update or customize Google Account email for Google Meet")
+def update_google_account(
+    req: UpdateGoogleAccountRequest,
+    current_user: Optional[User] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Allows doctor to edit or customize their Google Account / Google ID specifically for Google Meet."""
+    if not req.email or "@" not in req.email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A valid Google email address is required.",
+        )
+    user_id = current_user.id if current_user else "default_doctor"
+    res = google_oauth_service.update_google_email(user_id=user_id, email=req.email, db=db)
+    return res
 
 
 @router.post("/disconnect", summary="Disconnect Google Meet account")

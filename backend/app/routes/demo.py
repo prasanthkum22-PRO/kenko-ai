@@ -40,6 +40,9 @@ def seed_demo_data(db: Session = Depends(get_db)):
     """
     # ── 0. Seed Default Accounts ────────────────────────────────
     default_users = [
+        {"email": "prasanthanith5@gmail.com", "pass": "Doctor123!", "name": "Dr. Prasanth", "role": "DOCTOR", "doctor_id": "D-101"},
+        {"email": "prasanth.kum22@gmail.com", "pass": "Admin123!", "name": "Prasanth (Admin)", "role": "ADMIN"},
+        {"email": "prasanth.kum22@gmaill.com", "pass": "Admin123!", "name": "Prasanth (Admin)", "role": "ADMIN"},
         {"email": "doctor@medibridge.ai", "pass": "Doctor123!", "name": "Dr. Aarav Patel", "role": "DOCTOR", "doctor_id": "D-101"},
         {"email": "patient@medibridge.ai", "pass": "Patient123!", "name": "Aarav Sharma", "role": "PATIENT", "patient_id": "DEMO-P101"},
         {"email": "admin@medibridge.ai", "pass": "Admin123!", "name": "System Administrator", "role": "ADMIN"},

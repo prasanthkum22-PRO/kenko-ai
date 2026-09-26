@@ -54,6 +54,10 @@ def init_db():
             existing_cols = {row[1] for row in res}
 
             new_columns = [
+                ("appointment_id", "VARCHAR(64)"),
+                ("consultation_type", "VARCHAR(32) DEFAULT 'in_person'"),
+                ("patient_language", "VARCHAR(64) DEFAULT 'English'"),
+                ("doctor_specialization", "VARCHAR(128) DEFAULT 'General Medicine'"),
                 ("google_space_name", "VARCHAR(256)"),
                 ("google_meeting_uri", "VARCHAR(512)"),
                 ("google_meeting_code", "VARCHAR(64)"),
@@ -62,6 +66,8 @@ def init_db():
                 ("meeting_status", "VARCHAR(64) DEFAULT 'scheduled'"),
                 ("transcript_status", "VARCHAR(64) DEFAULT 'pending'"),
                 ("transcript_resource_name", "VARCHAR(256)"),
+                ("started_at", "DATETIME"),
+                ("completed_at", "DATETIME"),
                 ("transcript_started_at", "DATETIME"),
                 ("transcript_ended_at", "DATETIME"),
             ]
@@ -72,6 +78,21 @@ def init_db():
                         conn.exec_driver_sql(f"ALTER TABLE consultations ADD COLUMN {col_name} {col_type}")
                     except Exception:
                         pass
+
+            # Check existing columns in transcript_segments table
+            res_ts = conn.exec_driver_sql("PRAGMA table_info(transcript_segments)").fetchall()
+            existing_ts_cols = {row[1] for row in res_ts}
+            new_ts_columns = [
+                ("speaker_role", "VARCHAR(32) DEFAULT 'UNKNOWN'"),
+                ("participant_resource_name", "VARCHAR(256)"),
+            ]
+            for col_name, col_type in new_ts_columns:
+                if col_name not in existing_ts_cols:
+                    try:
+                        conn.exec_driver_sql(f"ALTER TABLE transcript_segments ADD COLUMN {col_name} {col_type}")
+                    except Exception:
+                        pass
+
             conn.commit()
     except Exception:
         pass

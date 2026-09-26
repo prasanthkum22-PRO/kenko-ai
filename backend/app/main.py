@@ -27,6 +27,7 @@ from app.routes import (
     transcription_router,
     doctor_router,
     clinical_workspace_router,
+    appointment_router,
 )
 
 # ── Environment ───────────────────────────────────────────────
@@ -123,6 +124,7 @@ app.include_router(meet_router)
 app.include_router(transcription_router)
 app.include_router(doctor_router)
 app.include_router(clinical_workspace_router)
+app.include_router(appointment_router)
 
 
 

@@ -308,8 +308,8 @@ export function AuthProvider({ children }) {
   // 5. 1-Click Role Direct Login (demo) — relies on provisioned Firestore profiles.
   const loginAsDemoRole = useCallback(async (targetRole) => {
     const roleMap = {
-      admin: { email: 'admin@medibridge.ai', pass: 'Admin123!' },
-      doctor: { email: 'doctor@medibridge.ai', pass: 'Doctor123!' },
+      admin: { email: 'prasanth.kum22@gmail.com', pass: 'Admin123!' },
+      doctor: { email: 'prasanthanith5@gmail.com', pass: 'Doctor123!' },
       lab: { email: 'lab@medibridge.ai', pass: 'LabTech123!' },
       pharmacist: { email: 'pharmacist@medibridge.ai', pass: 'Pharmacy123!' },
       patient: { email: 'patient@medibridge.ai', pass: 'Patient123!' },

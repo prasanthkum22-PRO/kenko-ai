@@ -36,10 +36,8 @@ async def create_google_meet(
 ):
     """
     Creates a new Google Meet space using Google Meet REST API v2.
-    1. Verifies consultation exists
-    2. Calls POST https://meet.googleapis.com/v2/spaces
-    3. Stores meeting metadata (google_space_name, google_meeting_uri, google_meeting_code)
-    4. Returns meeting URI for Doctor + Patient to join
+    Idempotent: if google_meeting_uri is already set, returns the existing one.
+    Authorization: doctor assigned to the consultation, or admin.
     """
     consultation_id = req.consultationId or req.consultation_id
     if not consultation_id:
@@ -55,17 +53,58 @@ async def create_google_meet(
             detail=f"Consultation '{consultation_id}' not found.",
         )
 
+    # Authorization: only the assigned doctor or admin
+    if current_user:
+        uid = current_user.id
+        role = (current_user.role or "").upper()
+        if role == "PATIENT":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the assigned doctor can create a Google Meet space.",
+            )
+        doctor_ids = {uid}
+        if getattr(current_user, "doctor_id", None):
+            doctor_ids.add(current_user.doctor_id)
+
+        if role in ("DOCTOR", "DOCTOR_PENDING") and consultation.doctor_id and consultation.doctor_id not in doctor_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not the assigned doctor for this consultation.",
+            )
+        if not consultation.doctor_id:
+            consultation.doctor_id = current_user.doctor_id or uid
+
     user_id = current_user.id if current_user else "default_doctor"
 
+    # ── Idempotency: return existing meeting if already created ──────────────
+    if consultation.google_meeting_uri and consultation.meeting_status not in (
+        "scheduled", "SCHEDULED", "meet_creation_failed", "MEET_CREATION_FAILED", ""
+    ):
+        logger.info(
+            f"[meet/create] Consultation {consultation_id} already has a Meet space. Returning existing."
+        )
+        return CreateGoogleMeetResponse(
+            success=True,
+            consultationId=consultation.id,
+            spaceName=consultation.google_space_name,
+            meetingUri=consultation.google_meeting_uri,
+            meetingCode=consultation.google_meeting_code,
+            message="Google Meet Space already exists. Returning existing meeting.",
+        )
+
+    # Mark as creating
+    consultation.meeting_status = "meet_creating"
+    consultation.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
     try:
-        # Create space via Google Meet REST API v2
         space_data = await google_meet_service.create_space(user_id=user_id, db=db)
-        
+
         space_name = space_data.get("name")
         meeting_uri = space_data.get("meetingUri")
         meeting_code = space_data.get("meetingCode")
+        is_mock = space_data.get("isMock", False)
 
-        # Update Consultation record
         consultation.google_space_name = space_name
         consultation.google_meeting_uri = meeting_uri
         consultation.google_meeting_code = meeting_code
@@ -75,17 +114,15 @@ async def create_google_meet(
         consultation.updated_at = datetime.now(timezone.utc)
         db.commit()
 
-        # Audit log
         audit = AuditLog(
             user_id=user_id,
             user_role="doctor",
             action="created_google_meet",
             resource_type="google_meet_space",
-            resource_id=space_name,
+            resource_id=space_name or consultation_id,
             details={
                 "consultation_id": consultation_id,
-                "meeting_uri": meeting_uri,
-                "is_mock": space_data.get("isMock", False),
+                "is_mock": is_mock,
             },
         )
         db.add(audit)
@@ -97,13 +134,20 @@ async def create_google_meet(
             spaceName=space_name,
             meetingUri=meeting_uri,
             meetingCode=meeting_code,
-            message="Google Meet Space created successfully.",
+            message="Google Meet Space created successfully." if not is_mock else "Google Meet Space ready (sandbox mode).",
         )
     except Exception as exc:
-        logger.error(f"Error creating Google Meet space: {exc}")
+        logger.error(f"[meet/create] Error creating Google Meet space for {consultation_id}: {exc}")
+        consultation.meeting_status = "meet_creation_failed"
+        consultation.updated_at = datetime.now(timezone.utc)
+        db.commit()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create Google Meet Space: {str(exc)}",
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "success": False,
+                "error": "MEET_CREATION_FAILED",
+                "message": "Google Meet could not be created. Check Google OAuth configuration and Meet API permissions.",
+            },
         )
 
 
@@ -156,8 +200,8 @@ async def get_google_meet_status(
         meetingCode=consultation.google_meeting_code,
         conferenceRecordName=consultation.conference_record_name,
         hasTranscript=has_transcript,
-        participantCount=2 if consultation.google_meeting_uri else 0,
-        message="Meeting status active.",
+        participantCount=len(consultation.transcript_segments) if has_transcript else 0,
+        message="Meeting status retrieved.",
     )
 
 

@@ -17,6 +17,9 @@ from sqlalchemy.orm import Session
 
 from app.models.db_models import GoogleOAuthToken, User
 
+from dotenv import load_dotenv
+load_dotenv()
+
 logger = logging.getLogger(__name__)
 
 # Minimum required Google Meet scopes as requested
@@ -35,13 +38,23 @@ GOOGLE_USERINFO_ENDPOINT = "https://www.googleapis.com/oauth2/v3/userinfo"
 
 
 class GoogleOAuthService:
-    def __init__(self):
-        self.client_id = os.getenv("GOOGLE_CLIENT_ID", "")
-        self.client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "")
-        self.redirect_uri = os.getenv(
+    @property
+    def client_id(self) -> str:
+        return os.getenv("GOOGLE_CLIENT_ID", "")
+
+    @property
+    def client_secret(self) -> str:
+        return os.getenv("GOOGLE_CLIENT_SECRET", "")
+
+    @property
+    def redirect_uri(self) -> str:
+        return os.getenv(
             "GOOGLE_REDIRECT_URI", "http://localhost:8000/api/google/callback"
         )
-        self.frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+    @property
+    def frontend_url(self) -> str:
+        return os.getenv("FRONTEND_URL", "http://localhost:5173")
 
     @property
     def is_configured(self) -> bool:
@@ -73,7 +86,7 @@ class GoogleOAuthService:
             "response_type": "code",
             "scope": " ".join(REQUIRED_SCOPES),
             "access_type": "offline",      # Required to receive a refresh token
-            "prompt": "consent",           # Forces consent screen to ensure refresh token is delivered
+            "prompt": "select_account consent",  # Allows doctor to choose or switch Google account
             "include_granted_scopes": "true",
             "state": state_encoded,
         }
@@ -251,19 +264,55 @@ class GoogleOAuthService:
 
         if not token_rec:
             return {
-                "is_connected": True,
-                "email": "doctor@medibridge.ai",
-                "scopes": REQUIRED_SCOPES,
+                "is_connected": False,
+                "email": None,
+                "scopes": [],
                 "expires_at": None,
                 "is_mock": not self.is_configured,
             }
 
         return {
             "is_connected": True,
-            "email": token_rec.email or "doctor@medibridge.ai",
+            "email": token_rec.email,
             "scopes": (token_rec.scopes or "").split(" ") if token_rec.scopes else REQUIRED_SCOPES,
             "expires_at": token_rec.expires_at.isoformat() if token_rec.expires_at else None,
             "is_mock": token_rec.access_token.startswith("mock_") if token_rec.access_token else False,
+        }
+
+    def update_google_email(self, user_id: str, email: str, db: Session) -> Dict[str, Any]:
+        """
+        Updates the doctor's Google Account email specifically for Google Meet.
+        """
+        token_rec = db.query(GoogleOAuthToken).filter(
+            GoogleOAuthToken.user_id == user_id,
+        ).first()
+
+        if not token_rec:
+            token_rec = db.query(GoogleOAuthToken).first()
+
+        clean_email = email.strip() if email else ""
+        if token_rec:
+            token_rec.email = clean_email
+            token_rec.is_valid = True
+            token_rec.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            db.refresh(token_rec)
+        else:
+            token_rec = self._save_or_update_token(
+                db=db,
+                user_id=user_id,
+                email=clean_email,
+                access_token="custom_meet_token_" + secrets.token_hex(16),
+                refresh_token="custom_meet_refresh_" + secrets.token_hex(16),
+                expires_in=86400 * 30,
+                scopes=" ".join(REQUIRED_SCOPES),
+            )
+
+        return {
+            "success": True,
+            "email": token_rec.email,
+            "is_connected": True,
+            "message": f"Google Meet account updated to {token_rec.email}",
         }
 
     async def disconnect(self, user_id: str, db: Session) -> bool:

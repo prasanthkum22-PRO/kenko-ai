@@ -69,6 +69,38 @@ export const getConsultationFull = async (id) => {
   return res.data;
 };
 
+// ─── Appointments API ─────────────────────────────────────────
+
+export const getAppointment = async (appointmentId) => {
+  const res = await api.get(`/api/appointments/${appointmentId}`);
+  return res.data?.appointment || res.data;
+};
+
+/**
+ * getAppointmentFull — returns the complete appointment response including:
+ * { appointment, patient, doctor, consultation, googleMeet }
+ * Used by VideoConsultationPage to populate all display fields.
+ */
+export const getAppointmentFull = async (appointmentId) => {
+  const res = await api.get(`/api/appointments/${appointmentId}`);
+  return res.data;
+};
+
+export const getAppointments = async (params = {}) => {
+  const res = await api.get('/api/appointments', { params });
+  return res.data;
+};
+
+export const createAppointmentMeet = async (appointmentId) => {
+  const res = await api.post(`/api/appointments/${appointmentId}/meet`);
+  return res.data;
+};
+
+export const getAppointmentMeetStatus = async (appointmentId) => {
+  const res = await api.get(`/api/appointments/${appointmentId}/meet/status`);
+  return res.data;
+};
+
 
 export const uploadConsultationAudio = async (id, audioBlob, durationSeconds) => {
   const formData = new FormData();
@@ -149,6 +181,11 @@ export const getGoogleAuthStatus = async () => {
 
 export const disconnectGoogleAuth = async () => {
   const res = await api.post('/api/google/disconnect');
+  return res.data;
+};
+
+export const updateGoogleAccount = async (email) => {
+  const res = await api.post('/api/google/account', { email });
   return res.data;
 };
 
