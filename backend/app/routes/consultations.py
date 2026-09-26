@@ -46,17 +46,22 @@ def create_consultation(
     db: Session = Depends(get_db),
 ):
     consultation = Consultation(
-        patient_id=req.patient_id,
-        patient_name=req.patient_name,
+        patient_id=req.patient_id or "P-1001",
+        patient_name=req.patient_name or "Patient",
         patient_age=req.patient_age,
         patient_gender=req.patient_gender,
+        patient_language=req.patient_language or "English",
         doctor_id=req.doctor_id,
-        doctor_name=req.doctor_name,
-        consultation_type=req.consultation_type,
-        has_consent=req.has_consent,
+        doctor_name=req.doctor_name or "Dr. Aarav Patel",
+        doctor_specialization=req.doctor_specialization or "General Medicine",
+        appointment_id=req.appointment_id,
+        consultation_type=req.consultation_type or "in_person",
+        has_consent=bool(req.has_consent),
         detected_language=req.detected_language or "English",
         is_demo=bool(req.is_demo),
         status="recording",
+        meeting_status="scheduled",
+        transcript_status="pending",
     )
     db.add(consultation)
     db.commit()
@@ -88,34 +93,49 @@ def create_consultation(
             current_time += 4.5
         db.commit()
 
-
-    log_action(
-        db,
-        action="created",
-        resource_type="consultation",
-        resource_id=consultation.id,
-        user_id=req.doctor_name,
-        user_role="doctor",
-    )
+    try:
+        log_action(
+            db,
+            action="created",
+            resource_type="consultation",
+            resource_id=consultation.id,
+            user_id=req.doctor_name or "doctor",
+            user_role="doctor",
+        )
+    except Exception as e:
+        logger.warning(f"Audit log failed: {e}")
 
     return ConsultationResponse(
         id=consultation.id,
-        consultation_type=consultation.consultation_type,
+        appointment_id=consultation.appointment_id,
+        consultation_type=consultation.consultation_type or "in_person",
         patient_id=consultation.patient_id,
         patient_name=consultation.patient_name,
         patient_age=consultation.patient_age,
         patient_gender=consultation.patient_gender,
-        doctor_name=consultation.doctor_name,
-        status=consultation.status,
-        detected_language=consultation.detected_language,
-        duration_seconds=consultation.duration_seconds,
-        has_consent=consultation.has_consent,
-        is_demo=consultation.is_demo,
-        created_at=consultation.created_at,
-        updated_at=consultation.updated_at,
-        transcript_count=0,
+        patient_language=consultation.patient_language or "English",
+        doctor_id=consultation.doctor_id,
+        doctor_name=consultation.doctor_name or "Dr. Aarav Patel",
+        doctor_specialization=consultation.doctor_specialization or "General Medicine",
+        status=consultation.status or "recording",
+        detected_language=consultation.detected_language or "English",
+        duration_seconds=consultation.duration_seconds or 0,
+        has_consent=consultation.has_consent if consultation.has_consent is not None else True,
+        is_demo=bool(consultation.is_demo),
+        google_space_name=consultation.google_space_name,
+        google_meeting_uri=consultation.google_meeting_uri,
+        google_meeting_code=consultation.google_meeting_code,
+        conference_record_name=consultation.conference_record_name,
+        meeting_status=consultation.meeting_status or "scheduled",
+        transcript_status=consultation.transcript_status or "pending",
+        started_at=consultation.started_at,
+        completed_at=consultation.completed_at,
+        created_at=consultation.created_at or datetime.now(timezone.utc),
+        updated_at=consultation.updated_at or datetime.now(timezone.utc),
+        transcript_count=len(consultation.transcript_segments) if consultation.transcript_segments else 0,
         is_approved=False,
     )
+
 
 
 @router.get("", response_model=List[ConsultationResponse], summary="List all consultations")

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { getConsultations, createConsultation } from '../services/api';
 import { useToast } from '../context/ToastContext';
 import {
@@ -11,6 +12,7 @@ import {
   IconCheck,
   IconSparkle,
 } from '../components/icons';
+
 
 export default function ConsultationsHubPage() {
   const navigate = useNavigate();
@@ -25,6 +27,9 @@ export default function ConsultationsHubPage() {
   const [patientAge, setPatientAge] = useState(38);
   const [patientGender, setPatientGender] = useState('Male');
   const [consentChecked, setConsentChecked] = useState(true);
+
+  const { user } = useAuth();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -58,14 +63,17 @@ export default function ConsultationsHubPage() {
 
   const handleCreateNew = async (e) => {
     e.preventDefault();
-    if (!patientName.trim()) return;
+    if (!patientName.trim() || isSubmitting) return;
 
     try {
+      setIsSubmitting(true);
       const created = await createConsultation({
         patient_name: patientName.trim(),
         patient_id: patientId.trim() || `P-${Math.floor(1000 + Math.random() * 9000)}`,
-        patient_age: Number(patientAge),
+        patient_age: Number(patientAge) || 30,
         patient_gender: patientGender,
+        doctor_id: user?.doctorId || user?.id || null,
+        doctor_name: user?.displayName || user?.full_name || 'Dr. Attending',
         consultation_type: newType,
         has_consent: consentChecked,
       });
@@ -79,9 +87,13 @@ export default function ConsultationsHubPage() {
       );
     } catch (err) {
       console.error('Failed to create consultation:', err);
-      toastError('Failed to initialize consultation session.', 'Error');
+      const detail = err.response?.data?.detail || err.message || 'Failed to initialize consultation session.';
+      toastError(detail, 'Error');
+    } finally {
+      setIsSubmitting(false);
     }
   };
+
 
   const searchLower = (search || '').toLowerCase().trim();
   const filtered = consultations.filter((c) => {
@@ -351,13 +363,15 @@ export default function ConsultationsHubPage() {
                 </div>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>
+                <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)} disabled={isSubmitting}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
-                  <IconMic size={14} /> Begin Consultation
+                <button type="submit" className="btn btn-primary flex items-center gap-1.5" disabled={isSubmitting}>
+                  <IconMic size={14} />
+                  <span>{isSubmitting ? 'Starting...' : 'Begin Consultation'}</span>
                 </button>
               </div>
+
             </form>
           </div>
         </div>
