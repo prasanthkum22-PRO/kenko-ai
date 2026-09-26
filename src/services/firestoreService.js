@@ -321,26 +321,36 @@ export const updateAppointmentFirestore = async (appointmentId, updates) => {
   });
 };
 
-export const acceptAppointmentFirestore = async (appointmentId, customMeetUri = null) => {
+export const acceptAppointmentFirestore = async (appointmentId, customMeetUri = null, customMeetCode = null, customSpaceName = null) => {
   if (!appointmentId) return null;
   const aptRef = doc(db, 'appointments', appointmentId);
   const snap = await getDoc(aptRef);
   const currentData = snap.exists() ? snap.data() : {};
 
   const isVideo = (currentData.consultationType || currentData.appointment_type || 'video').toLowerCase() === 'video';
-  // Use real Google Meet instant room or custom URI
-  const meetingUri = customMeetUri || currentData.googleMeetingUri || (isVideo ? 'https://meet.google.com/new' : '');
-  const meetingCode = isVideo ? 'instant-meet' : '';
+  const meetingUri = customMeetUri || currentData.googleMeetingUri || currentData.googleMeet?.meetingUri || null;
+  const meetingCode = customMeetCode || currentData.googleMeetingCode || currentData.googleMeet?.meetingCode || null;
+  const spaceName = customSpaceName || currentData.googleSpaceName || currentData.googleMeet?.spaceName || null;
 
   const updates = {
     status: 'CONFIRMED',
-    meetStatus: isVideo ? 'READY' : 'NOT_APPLICABLE',
+    meetStatus: meetingUri ? 'READY' : (isVideo ? 'SCHEDULED' : 'NOT_APPLICABLE'),
     googleMeetingUri: meetingUri,
     googleMeetingCode: meetingCode,
-    googleSpaceName: currentData.googleSpaceName || '',
+    googleSpaceName: spaceName,
     acceptedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
+
+  if (meetingUri) {
+    updates.googleMeet = {
+      spaceName: spaceName,
+      meetingUri: meetingUri,
+      meetingCode: meetingCode,
+      status: 'READY',
+      updatedAt: serverTimestamp(),
+    };
+  }
 
   await updateDoc(aptRef, updates);
   return { id: appointmentId, ...currentData, ...updates };

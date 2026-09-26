@@ -22,6 +22,7 @@ from app.utils.auth import get_current_user, require_authenticated_user
 from app.services.google_meet_service import google_meet_service
 from app.services.transcript_service import transcript_service
 from app.services.participant_service import participant_service
+from app.services.firebase_service import firebase_service
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,17 @@ async def create_google_meet(
         logger.info(
             f"[meet/create] Consultation {consultation_id} already has a Meet space. Returning existing."
         )
+        try:
+            await firebase_service.sync_appointment_meet(
+                appointment_id=consultation.appointment_id or consultation_id,
+                space_name=consultation.google_space_name or "",
+                meet_uri=consultation.google_meeting_uri,
+                meet_code=consultation.google_meeting_code or "",
+                consultation_id=consultation_id,
+            )
+        except Exception as fe:
+            logger.debug(f"Firestore meet create idempotency sync note: {fe}")
+
         return CreateGoogleMeetResponse(
             success=True,
             consultationId=consultation.id,
@@ -113,6 +125,17 @@ async def create_google_meet(
         consultation.consultation_type = "video"
         consultation.updated_at = datetime.now(timezone.utc)
         db.commit()
+
+        try:
+            await firebase_service.sync_appointment_meet(
+                appointment_id=consultation.appointment_id or consultation_id,
+                space_name=space_name or "",
+                meet_uri=meeting_uri,
+                meet_code=meeting_code or "",
+                consultation_id=consultation_id,
+            )
+        except Exception as fe:
+            logger.debug(f"Firestore meet create sync note: {fe}")
 
         audit = AuditLog(
             user_id=user_id,

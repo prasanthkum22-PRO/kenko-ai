@@ -79,16 +79,42 @@ class FirebaseService:
         }
         await self.write_document("users", user_id, data)
 
-    async def sync_appointment_meet(self, appointment_id: str, space_name: str, meet_uri: str, meet_code: str):
+    async def sync_appointment_meet(
+        self,
+        appointment_id: str,
+        space_name: str,
+        meet_uri: str,
+        meet_code: str,
+        consultation_id: Optional[str] = None,
+    ):
         """Store Google Meet meeting info without exposing OAuth credentials."""
-        data = {
+        meet_payload = {
+            "spaceName": space_name,
+            "meetingUri": meet_uri,
+            "meetingCode": meet_code,
+            "status": "READY",
+            "createdAt": datetime.now(timezone.utc),
+        }
+        appt_data = {
             "googleSpaceName": space_name,
             "googleMeetingUri": meet_uri,
             "googleMeetingCode": meet_code,
-            "status": "MEET_READY",
+            "meetStatus": "READY",
+            "status": "CONFIRMED",
+            "googleMeet": meet_payload,
             "updatedAt": datetime.now(timezone.utc),
         }
-        await self.write_document("appointments", appointment_id, data)
+        await self.write_document("appointments", appointment_id, appt_data)
+        if consultation_id:
+            consult_data = {
+                "googleSpaceName": space_name,
+                "googleMeetingUri": meet_uri,
+                "googleMeetingCode": meet_code,
+                "meetingStatus": "meet_ready",
+                "googleMeet": meet_payload,
+                "updatedAt": datetime.now(timezone.utc),
+            }
+            await self.write_document("consultations", consultation_id, consult_data)
 
     async def sync_transcript_entry(self, consultation_id: str, entry_id: str, speaker_role: str, speaker_name: str, text: str, start_time: float, end_time: float):
         data = {

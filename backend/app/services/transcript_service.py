@@ -18,6 +18,7 @@ from app.models.db_models import Consultation, TranscriptSegment, AuditLog
 from app.services.google_oauth_service import google_oauth_service
 from app.services.google_meet_service import google_meet_service
 from app.services.participant_service import participant_service
+from app.services.firebase_service import firebase_service
 
 logger = logging.getLogger(__name__)
 
@@ -236,8 +237,10 @@ class TranscriptService:
             )
             db.add(seg)
             current_seconds += 4.5
+            entry_id = entry.get("name", "").split("/")[-1] if "/" in entry.get("name", "") else f"entry_{len(normalized_entries)+1}"
 
             normalized_entries.append({
+                "entryId": entry_id,
                 "speakerRole": speaker_role,
                 "participantId": p_resource,
                 "participantName": p_info.get("displayName", speaker_label),
@@ -245,6 +248,20 @@ class TranscriptService:
                 "startTime": start_time_str or f"{int(current_seconds // 60):02d}:{int(current_seconds % 60):02d}",
                 "endTime": end_time_str or f"{int((current_seconds + 4) // 60):02d}:{int((current_seconds + 4) % 60):02d}",
             })
+
+            # Sync individual entry to Firestore subcollection: consultations/{id}/transcriptEntries/{entryId}
+            try:
+                await firebase_service.sync_transcript_entry(
+                    consultation_id=consultation_id,
+                    entry_id=entry_id,
+                    speaker_role=speaker_role,
+                    speaker_name=p_info.get("displayName", speaker_label),
+                    text=text,
+                    start_time=current_seconds - 4.5,
+                    end_time=current_seconds,
+                )
+            except Exception as fe:
+                logger.debug(f"Firestore transcript entry sync note: {fe}")
 
         consultation.transcript_status = "ready"
         consultation.meeting_status = "transcript_ready"

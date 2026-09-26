@@ -24,6 +24,7 @@ from app.db.database import get_db
 from app.models.db_models import Appointment, Consultation, User, AuditLog, Notification
 from app.utils.auth import get_current_user, require_authenticated_user
 from app.services.google_meet_service import google_meet_service
+from app.services.firebase_service import firebase_service
 
 logger = logging.getLogger(__name__)
 
@@ -501,15 +502,33 @@ async def create_appointment_meet(
                 Consultation.id == appointment.consultation_id
             ).first()
 
+        # Ensure synced to Firestore
+        try:
+            await firebase_service.sync_appointment_meet(
+                appointment_id=appointment_id,
+                space_name=appointment.google_space_name or "",
+                meet_uri=appointment.google_meeting_uri,
+                meet_code=appointment.google_meeting_code or "",
+                consultation_id=appointment.consultation_id,
+            )
+        except Exception as fe:
+            logger.debug(f"Firestore idempotency sync note: {fe}")
+
         return {
             "success": True,
             "idempotent": True,
             "appointmentId": appointment_id,
+            "consultationId": appointment.consultation_id,
+            "meeting": {
+                "spaceName": appointment.google_space_name,
+                "meetingUri": appointment.google_meeting_uri,
+                "meetingCode": appointment.google_meeting_code,
+                "status": "READY",
+            },
             "spaceName": appointment.google_space_name,
             "meetingUri": appointment.google_meeting_uri,
             "meetingCode": appointment.google_meeting_code,
-            "meetStatus": appointment.meet_status,
-            "consultationId": appointment.consultation_id,
+            "meetStatus": "READY",
             "message": "Google Meet Space already exists. Returning existing meeting.",
         }
 
@@ -629,6 +648,18 @@ async def create_appointment_meet(
         db.commit()
         logger.info(f"[appointments/{appointment_id}] Consultation updated: {consultation.id}")
 
+    # ── Immediately Sync to Firebase Firestore ──────────────────────────────
+    try:
+        await firebase_service.sync_appointment_meet(
+            appointment_id=appointment_id,
+            space_name=space_name or "",
+            meet_uri=meeting_uri,
+            meet_code=meeting_code or "",
+            consultation_id=consultation.id if consultation else None,
+        )
+    except Exception as fe:
+        logger.debug(f"Firestore new space sync note: {fe}")
+
     # ── Audit log ────────────────────────────────────────────────────────────
     audit = AuditLog(
         user_id=user_id,
@@ -651,11 +682,17 @@ async def create_appointment_meet(
         "success": True,
         "idempotent": False,
         "appointmentId": appointment_id,
+        "consultationId": consultation.id if consultation else None,
+        "meeting": {
+            "spaceName": space_name,
+            "meetingUri": meeting_uri,
+            "meetingCode": meeting_code,
+            "status": "READY",
+        },
         "spaceName": space_name,
         "meetingUri": meeting_uri,
         "meetingCode": meeting_code,
         "meetStatus": "READY",
-        "consultationId": consultation.id if consultation else None,
         "isMock": is_mock,
         "message": "Google Meet Space created successfully." if not is_mock else "Google Meet Space created (sandbox mode).",
     }

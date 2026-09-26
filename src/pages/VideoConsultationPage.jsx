@@ -23,6 +23,7 @@ import {
   summarizeConsultation,
   getAppointment,
   getAppointmentFull,
+  createAppointmentMeet,
 } from '../services/api';
 import {
   getAppointmentFirestore,
@@ -135,16 +136,21 @@ export default function VideoConsultationPage() {
         try {
           const aptFs = await getAppointmentFirestore(urlAppointmentId);
           if (aptFs) {
-            let meetingUri = aptFs.googleMeetingUri || aptFs.google_meeting_uri;
-            let meetingCode = aptFs.googleMeetingCode || aptFs.google_meeting_code;
-            let spaceName = aptFs.googleSpaceName || aptFs.google_space_name;
+            let meetingUri = aptFs.googleMeetingUri || aptFs.googleMeet?.meetingUri || aptFs.google_meeting_uri;
+            let meetingCode = aptFs.googleMeetingCode || aptFs.googleMeet?.meetingCode || aptFs.google_meeting_code;
+            let spaceName = aptFs.googleSpaceName || aptFs.googleMeet?.spaceName || aptFs.google_space_name;
 
-            if (!meetingUri) {
-              const codeSuffix = (aptFs.id || 'telehealth').replace(/[^a-zA-Z0-9]/g, '').slice(0, 9);
-              meetingCode = `kenko-${codeSuffix.slice(0, 3)}-${codeSuffix.slice(3, 7)}-${codeSuffix.slice(7) || 'med'}`;
-              meetingUri = `https://meet.google.com/${meetingCode}`;
-              spaceName = `spaces/${meetingCode}`;
-              await acceptAppointmentFirestore(aptFs.id, meetingUri).catch(() => null);
+            if (!meetingUri && isDoctor) {
+              try {
+                const meetRes = await createAppointmentMeet(urlAppointmentId);
+                if (meetRes?.meetingUri || meetRes?.meeting?.meetingUri) {
+                  meetingUri = meetRes.meetingUri || meetRes.meeting?.meetingUri;
+                  meetingCode = meetRes.meetingCode || meetRes.meeting?.meetingCode;
+                  spaceName = meetRes.spaceName || meetRes.meeting?.spaceName;
+                }
+              } catch (mErr) {
+                console.debug('Meet space creation note:', mErr);
+              }
             }
 
             const mergedAppt = {
@@ -178,14 +184,14 @@ export default function VideoConsultationPage() {
               google_meeting_uri: meetingUri,
               google_meeting_code: meetingCode,
               google_space_name: spaceName,
-              meeting_status: 'meet_ready',
-              status: 'in_progress',
+              meeting_status: meetingUri ? 'meet_ready' : 'scheduled',
+              status: meetingUri ? 'in_progress' : 'scheduled',
               has_consent: true,
             };
             setConsultation(augmented);
             setConsultationId(cId);
             setTranscriptStatus('pending');
-            setTimerActive(true);
+            setTimerActive(Boolean(meetingUri));
             setLoadError(null);
             setIsLoading(false);
             return;
@@ -223,10 +229,10 @@ export default function VideoConsultationPage() {
                 patient_gender: mergedAppt.patient_gender,
                 doctor_name: mergedAppt.doctor_name,
                 doctor_department: mergedAppt.doctor_department,
-                google_meeting_uri: apptFull.googleMeet?.meetingUri || c.googleMeetingUri || `https://meet.google.com/kenko-${urlAppointmentId.slice(0, 7)}`,
-                google_meeting_code: apptFull.googleMeet?.meetingCode || c.googleMeetingCode || null,
-                google_space_name: apptFull.googleMeet?.spaceName || c.googleSpaceName || null,
-                meeting_status: apptFull.googleMeet?.status || c.meetingStatus || 'meet_ready',
+                google_meeting_uri: apptFull.googleMeet?.meetingUri || c.googleMeetingUri || c.google_meeting_uri || null,
+                google_meeting_code: apptFull.googleMeet?.meetingCode || c.googleMeetingCode || c.google_meeting_code || null,
+                google_space_name: apptFull.googleMeet?.spaceName || c.googleSpaceName || c.google_space_name || null,
+                meeting_status: apptFull.googleMeet?.status || c.meetingStatus || c.meeting_status || (apptFull.googleMeet?.meetingUri ? 'meet_ready' : 'scheduled'),
               };
               setConsultation(augmented);
               if (cId) setConsultationId(cId);
@@ -263,16 +269,16 @@ export default function VideoConsultationPage() {
           } catch {}
         }
       } else if (!consultation) {
-        // Synthesize fallback consultation container so meet interface opens seamlessly
+        // Standard consultation container
         setConsultation({
           id: cId,
           patient_name: appointment?.patient_name || 'Patient',
           doctor_name: appointment?.doctor_name || 'Dr. Specialist',
           doctor_department: appointment?.doctor_department || 'General Medicine',
-          google_meeting_uri: appointment?.google_meeting_uri || `https://meet.google.com/kenko-${cId.slice(0, 7)}`,
-          google_meeting_code: appointment?.google_meeting_code || `kenko-${cId.slice(0, 3)}`,
-          meeting_status: 'meet_ready',
-          status: 'in_progress',
+          google_meeting_uri: appointment?.google_meeting_uri || null,
+          google_meeting_code: appointment?.google_meeting_code || null,
+          meeting_status: appointment?.google_meeting_uri ? 'meet_ready' : 'scheduled',
+          status: 'scheduled',
         });
       }
     } catch {

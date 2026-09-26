@@ -15,6 +15,7 @@ import {
   updateGoogleAccount,
   disconnectGoogleAuth,
   createGoogleMeet,
+  createAppointmentMeet,
   getGoogleMeetStatus,
   endGoogleMeet,
   syncGoogleMeetTranscript,
@@ -77,31 +78,27 @@ export default function GoogleMeetCard({
     async function checkAuth() {
       const cachedEmail = localStorage.getItem('kenko_doctor_google_email');
       if (cachedEmail && active) {
-        setAuthStatus({
-          is_connected: true,
-          email: cachedEmail,
-          is_mock: false,
-          checked: true,
-        });
         setCustomGoogleEmail(cachedEmail);
       }
 
       try {
         const res = await getGoogleAuthStatus();
         if (active && res) {
-          const email = res.email || cachedEmail || null;
           setAuthStatus({
-            is_connected: Boolean(res.is_connected || cachedEmail),
-            email,
+            is_connected: Boolean(res.is_connected),
+            email: res.email || null,
             is_mock: Boolean(res.is_mock),
             checked: true,
           });
+          if (res.email) {
+            setCustomGoogleEmail(res.email);
+          }
         }
       } catch {
         if (active) {
           setAuthStatus({
-            is_connected: Boolean(cachedEmail),
-            email: cachedEmail || null,
+            is_connected: false,
+            email: null,
             is_mock: false,
             checked: true,
           });
@@ -208,7 +205,7 @@ export default function GoogleMeetCard({
 
   const handleCreateMeet = async () => {
     if (!consentConfirmed) { setConsentModalOpen(true); return; }
-    const targetId = consultation?.id || appointment?.id || 'consult_room';
+    const apptId = appointment?.id || consultation?.appointment_id || consultation?.id;
     setMeetCreationError(null);
     try {
       setLoading(true);
@@ -216,25 +213,53 @@ export default function GoogleMeetCard({
       let meetCode = null;
       let spaceName = null;
 
-      try {
-        const res = await createGoogleMeet(targetId, consultation?.patient_id || appointment?.patient_id);
-        if (res?.meetingUri) {
-          meetUri = res.meetingUri;
-          meetCode = res.meetingCode || null;
-          spaceName = res.spaceName || null;
+      // 1. First try creating via appointment route
+      if (appointment?.id || consultation?.appointment_id) {
+        try {
+          const res = await createAppointmentMeet(appointment?.id || consultation?.appointment_id);
+          if (res?.meetingUri || res?.meeting?.meetingUri) {
+            meetUri = res.meetingUri || res.meeting?.meetingUri;
+            meetCode = res.meetingCode || res.meeting?.meetingCode || null;
+            spaceName = res.spaceName || res.meeting?.spaceName || null;
+          }
+        } catch (err) {
+          console.debug('createAppointmentMeet note:', err);
         }
-      } catch (err) {
-        console.warn('Backend createGoogleMeet note, generating Firestore Google Meet link:', err);
+      }
+
+      // 2. Fallback to consultation route if needed
+      if (!meetUri && consultation?.id) {
+        try {
+          const res = await createGoogleMeet(consultation.id, consultation.patient_id || appointment?.patient_id);
+          if (res?.meetingUri) {
+            meetUri = res.meetingUri;
+            meetCode = res.meetingCode || null;
+            spaceName = res.spaceName || null;
+          }
+        } catch (err) {
+          console.debug('createGoogleMeet note:', err);
+        }
+      }
+
+      // 3. Check if demo mode is explicitly enabled
+      const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true';
+      if (!meetUri && isDemoMode) {
+        const demoCode = 'med-demo-room';
+        meetUri = `https://meet.google.com/${demoCode}`;
+        meetCode = demoCode;
+        spaceName = `spaces/${demoCode}`;
       }
 
       if (!meetUri) {
-        meetCode = 'instant-meet';
-        meetUri = 'https://meet.google.com/new';
-        spaceName = 'spaces/instant-meet';
+        setMeetCreationError('Unable to prepare Google Meet space. Please check backend OAuth configuration and retry.');
+        setMeetData((prev) => ({ ...prev, meetingStatus: 'meet_creation_failed' }));
+        toastError('Failed to create Google Meet space. Please retry.', 'Creation Error');
+        return;
+      }
 
-        if (appointment?.id) {
-          await acceptAppointmentFirestore(appointment.id, meetUri).catch(() => null);
-        }
+      // Update Firestore with real meeting metadata
+      if (appointment?.id) {
+        await acceptAppointmentFirestore(appointment.id, meetUri, meetCode, spaceName).catch(() => null);
       }
 
       setMeetData((prev) => ({
@@ -244,10 +269,12 @@ export default function GoogleMeetCard({
         meetingCode: meetCode || null,
         meetingStatus: 'meet_ready',
       }));
-      success('Consultation Google Meet is ready.', 'Meeting Ready');
+      success('Google Meet Space is ready for consultation.', 'Meeting Ready');
       if (onStatusChange) onStatusChange('meet_ready');
       if (onConsultationUpdated) onConsultationUpdated();
     } catch (err) {
+      setMeetCreationError(err?.message || 'Failed to create Google Meet space.');
+      setMeetData((prev) => ({ ...prev, meetingStatus: 'meet_creation_failed' }));
       toastError('Failed to create Google Meet.', 'Creation Error');
     } finally {
       setLoading(false);
@@ -255,10 +282,11 @@ export default function GoogleMeetCard({
   };
 
   const handleJoinMeet = () => {
-    const targetUri = meetData.meetingUri && !meetData.meetingUri.includes('kenko-')
-      ? meetData.meetingUri
-      : 'https://meet.google.com/new';
-    window.open(targetUri, '_blank', 'noopener,noreferrer');
+    if (!meetData.meetingUri) {
+      toastError('Google Meet link is not ready yet.', 'Cannot Join');
+      return;
+    }
+    window.open(meetData.meetingUri, '_blank', 'noopener,noreferrer');
   };
 
   const handleEndMeet = async () => {

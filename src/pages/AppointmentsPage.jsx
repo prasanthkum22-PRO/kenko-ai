@@ -475,15 +475,33 @@ export default function AppointmentsPage() {
   const handleAcceptAppointment = async (appointmentId) => {
     setActionLoading(true);
     try {
-      const res = await acceptAppointmentFirestore(appointmentId);
-      success('Appointment accepted! Google Meet link generated and synced to patient.', 'Appointment Confirmed');
+      // 1. Call backend to create/retrieve the official Google Meet Space
+      let meetInfo = null;
+      try {
+        const meetRes = await createAppointmentMeet(appointmentId);
+        if (meetRes?.meetingUri) {
+          meetInfo = meetRes;
+        }
+      } catch (backendErr) {
+        console.debug('Backend Meet space creation note:', backendErr);
+      }
+
+      // 2. Accept in Firestore with real meet metadata
+      const res = await acceptAppointmentFirestore(
+        appointmentId,
+        meetInfo?.meetingUri || null,
+        meetInfo?.meetingCode || null,
+        meetInfo?.spaceName || null
+      );
+      success('Appointment confirmed and synced to patient.', 'Appointment Confirmed');
       setAppointments(prev =>
         prev.map(a => a.id === appointmentId ? {
           ...a,
           status: 'CONFIRMED',
-          meetStatus: 'READY',
-          googleMeetingUri: res.googleMeetingUri,
-          googleMeetingCode: res.googleMeetingCode,
+          meetStatus: (meetInfo?.meetingUri || res?.googleMeetingUri) ? 'READY' : a.meetStatus,
+          googleMeetingUri: meetInfo?.meetingUri || res?.googleMeetingUri || a.googleMeetingUri,
+          googleMeetingCode: meetInfo?.meetingCode || res?.googleMeetingCode || a.googleMeetingCode,
+          googleSpaceName: meetInfo?.spaceName || res?.googleSpaceName || a.googleSpaceName,
         } : a)
       );
     } catch (err) {
@@ -514,11 +532,8 @@ export default function AppointmentsPage() {
   const handleJoinVideoConsultation = async (apt, forceGoogleMeet = false) => {
     if (apt.appointmentType !== 'video') return;
 
-    if (forceGoogleMeet) {
-      const meetUrl = apt.googleMeetingUri && !apt.googleMeetingUri.includes('kenko-') 
-        ? apt.googleMeetingUri 
-        : 'https://meet.google.com/new';
-      window.open(meetUrl, '_blank', 'noopener,noreferrer');
+    if (forceGoogleMeet && apt.googleMeetingUri) {
+      window.open(apt.googleMeetingUri, '_blank', 'noopener,noreferrer');
       return;
     }
 

@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getDoctorWorkspace, getConsultations, getLabTasks, getAppointments } from '../../services/api';
+import { getDoctorWorkspace, getConsultations, getLabTasks, getAppointments, createAppointmentMeet } from '../../services/api';
 import {
   listUserAppointmentsFirestore,
   listenToUserAppointmentsFirestore,
   updateAppointmentFirestore,
+  acceptAppointmentFirestore,
+  declineAppointmentFirestore,
 } from '../../services/firestoreService';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -144,22 +146,41 @@ export default function DoctorWorkspace() {
 
   const handleAcceptAppointment = async (apt) => {
     try {
-      const updated = await acceptAppointmentFirestore(apt.id);
+      // 1. Create or retrieve official Google Meet Space from backend
+      let meetInfo = null;
+      try {
+        const meetRes = await createAppointmentMeet(apt.id);
+        if (meetRes?.meetingUri) {
+          meetInfo = meetRes;
+        }
+      } catch (backendErr) {
+        console.debug('Backend Meet space creation note:', backendErr);
+      }
+
+      // 2. Accept in Firestore with real meet metadata
+      const updated = await acceptAppointmentFirestore(
+        apt.id,
+        meetInfo?.meetingUri || null,
+        meetInfo?.meetingCode || null,
+        meetInfo?.spaceName || null
+      );
+
       setAppointments((prev) =>
         prev.map((a) =>
           a.id === apt.id
             ? {
                 ...a,
                 status: 'CONFIRMED',
-                meetStatus: 'READY',
-                googleMeetingUri: updated?.googleMeetingUri || a.googleMeetingUri,
-                googleMeetingCode: updated?.googleMeetingCode || a.googleMeetingCode,
+                meetStatus: (meetInfo?.meetingUri || updated?.googleMeetingUri) ? 'READY' : a.meetStatus,
+                googleMeetingUri: meetInfo?.meetingUri || updated?.googleMeetingUri || a.googleMeetingUri,
+                googleMeetingCode: meetInfo?.meetingCode || updated?.googleMeetingCode || a.googleMeetingCode,
+                googleSpaceName: meetInfo?.spaceName || updated?.googleSpaceName || a.googleSpaceName,
               }
             : a
         )
       );
       success(
-        `Appointment for ${apt.patientName} accepted! Google Meet link generated and synced to patient.`,
+        `Appointment for ${apt.patientName} confirmed!`,
         'Appointment Confirmed'
       );
     } catch (err) {
