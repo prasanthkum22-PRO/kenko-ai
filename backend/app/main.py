@@ -92,13 +92,15 @@ app = FastAPI(
 
 
 # ── CORS Middleware ───────────────────────────────────────────
-# Read allowed origins from environment variable (default to local frontend Vite server)
-allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000")
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,https://kenko-ai-1.onrender.com")
 allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
+if "https://kenko-ai-1.onrender.com" not in allowed_origins:
+    allowed_origins.append("https://kenko-ai-1.onrender.com")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=r"https://.*\.onrender\.com",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

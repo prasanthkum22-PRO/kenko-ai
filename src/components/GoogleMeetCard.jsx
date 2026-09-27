@@ -123,19 +123,34 @@ export default function GoogleMeetCard({
   }, [consultation]);
 
   const handleConnectGoogle = async () => {
+    const currentUrl = window.location.href;
+    const clientId = '48743221773-adh94vkboqogbj0mhvkja68o17ij9g5s.apps.googleusercontent.com';
+    const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    const redirectUri = isLocal
+      ? 'http://localhost:8000/api/google/callback'
+      : `${window.location.origin}/api/google/callback`;
+    const scopes = [
+      'https://www.googleapis.com/auth/meetings.space.created',
+      'https://www.googleapis.com/auth/meetings.space.readonly',
+      'openid',
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/userinfo.profile',
+    ].join(' ');
+    const statePayload = encodeURIComponent(JSON.stringify({ return_url: currentUrl }));
+    const directGoogleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes)}&access_type=offline&prompt=select_account%20consent&include_granted_scopes=true&state=${statePayload}`;
+
     try {
       setLoading(true);
-      const currentUrl = window.location.href;
-      const res = await getGoogleAuthUrl(currentUrl);
+      const res = await getGoogleAuthUrl(currentUrl).catch(() => null);
       if (res?.auth_url) {
         window.location.href = res.auth_url;
         return;
       }
-      toastError('Could not initialize Google authentication. Please check backend connection.', 'OAuth Error');
+      // Direct OAuth redirect if backend endpoint is in transit
+      window.location.href = directGoogleAuthUrl;
     } catch (err) {
-      console.error('Google OAuth URL error:', err);
-      const msg = err?.response?.data?.message || err?.response?.data?.detail || err?.message || 'Could not connect to Google. Please check your network connection.';
-      toastError(msg, 'OAuth Error');
+      console.error('Google OAuth URL redirect note:', err);
+      window.location.href = directGoogleAuthUrl;
     } finally {
       setLoading(false);
     }
