@@ -23,6 +23,8 @@ dist-ssr
 .env
 .env.*
 !.env.example
+*client_secret*.json
+client_secrets.json
 
 # ── Python ───────────────────────────────────────────────────
 .venv/

@@ -9,6 +9,7 @@ import json
 import logging
 import secrets
 import urllib.parse
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
 
@@ -38,13 +39,39 @@ GOOGLE_USERINFO_ENDPOINT = "https://www.googleapis.com/oauth2/v3/userinfo"
 
 
 class GoogleOAuthService:
+    def _load_client_secret_file(self) -> Dict[str, str]:
+        candidates = [
+            Path(__file__).resolve().parent.parent.parent / "client_secrets.json",
+            Path("client_secrets.json").resolve(),
+            Path("backend/client_secrets.json").resolve(),
+        ]
+        for path in candidates:
+            if path.is_file():
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        web = data.get("web", {})
+                        return {
+                            "client_id": web.get("client_id", ""),
+                            "client_secret": web.get("client_secret", ""),
+                        }
+                except Exception:
+                    pass
+        return {}
+
     @property
     def client_id(self) -> str:
-        return os.getenv("GOOGLE_CLIENT_ID", "")
+        cid = os.getenv("GOOGLE_CLIENT_ID", "")
+        if not cid:
+            cid = self._load_client_secret_file().get("client_id", "")
+        return cid
 
     @property
     def client_secret(self) -> str:
-        return os.getenv("GOOGLE_CLIENT_SECRET", "")
+        sec = os.getenv("GOOGLE_CLIENT_SECRET", "")
+        if not sec:
+            sec = self._load_client_secret_file().get("client_secret", "")
+        return sec
 
     @property
     def redirect_uri(self) -> str:
