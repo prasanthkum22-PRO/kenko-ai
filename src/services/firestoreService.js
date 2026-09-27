@@ -51,8 +51,39 @@ export const getAllUsers = async () => {
 };
 
 export const updateUserStatus = async (uid, status) => {
+  if (!uid) return;
   const userDocRef = doc(db, 'users', uid);
-  await updateDoc(userDocRef, { accountStatus: status, status, updatedAt: serverTimestamp() });
+  await setDoc(userDocRef, { accountStatus: status, status, updatedAt: serverTimestamp() }, { merge: true });
+};
+
+export const updateUserRole = async (uid, role, extra = {}) => {
+  if (!uid) return;
+  const userDocRef = doc(db, 'users', uid);
+  const roleUpper = (role || 'PATIENT').toUpperCase();
+  const payload = {
+    role: roleUpper,
+    updatedAt: serverTimestamp(),
+    ...extra,
+  };
+  if (roleUpper === 'PATIENT' && !payload.patientId) {
+    payload.patientId = `PT-${String(uid).slice(0, 6).toUpperCase()}`;
+  } else if (roleUpper === 'DOCTOR' && !payload.doctorId) {
+    payload.doctorId = `DR-${String(uid).slice(0, 6).toUpperCase()}`;
+  }
+  await setDoc(userDocRef, payload, { merge: true });
+
+  // If email is provided or exists on profile, sync matching email documents
+  if (extra.email) {
+    try {
+      const snap = await getDocs(query(collection(db, 'users'), where('email', '==', extra.email), limit(10)));
+      for (const d of snap.docs) {
+        if (d.id !== uid) {
+          await setDoc(d.ref, { role: roleUpper, updatedAt: serverTimestamp() }, { merge: true });
+        }
+      }
+    } catch {}
+  }
+  return payload;
 };
 
 export const saveUserProfile = async (uid, userData) => {
@@ -259,10 +290,10 @@ export const approveDoctorApplicationFirestore = async (applicationId, adminUser
   });
 
   // 2. Promote user to DOCTOR
-  await updateDoc(doc(db, 'users', appData.userId), {
+  await setDoc(doc(db, 'users', appData.userId), {
     role: 'DOCTOR',
     updatedAt: now,
-  });
+  }, { merge: true });
 
   // 3. Create public doctor profile
   await setDoc(doc(db, 'doctorProfiles', appData.userId), {

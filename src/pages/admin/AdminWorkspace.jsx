@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { getAllUsers, updateUserStatus, getAuditLogs } from '../../services/firestoreService';
+import { getAllUsers, updateUserStatus, updateUserRole, getUserProfileByEmail, getAuditLogs } from '../../services/firestoreService';
+import { adminUpdateUserRole, adminUpdateUserStatus } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import {
   IconActivity,
@@ -269,16 +270,55 @@ export default function AdminWorkspace() {
   const handleToggleUserStatus = async (targetUser) => {
     const newStatus = targetUser.status === 'Active' ? 'Suspended' : 'Active';
     try {
-      await updateUserStatus(targetUser.uid, newStatus);
+      try {
+        await adminUpdateUserStatus(targetUser.id || targetUser.uid, newStatus === 'Active' ? 'ACTIVE' : 'SUSPENDED');
+      } catch {}
+      try {
+        await updateUserStatus(targetUser.uid, newStatus);
+      } catch {}
       success(`User ${targetUser.name || targetUser.email} is now ${newStatus}`, 'User Updated');
       setUsers((prev) =>
-        prev.map((u) => (u.uid === targetUser.uid ? { ...u, status: newStatus } : u))
+        prev.map((u) => ((u.uid === targetUser.uid || u.id === targetUser.id) ? { ...u, status: newStatus } : u))
       );
     } catch {
       setUsers((prev) =>
-        prev.map((u) => (u.uid === targetUser.uid ? { ...u, status: newStatus } : u))
+        prev.map((u) => ((u.uid === targetUser.uid || u.id === targetUser.id) ? { ...u, status: newStatus } : u))
       );
       success(`User status updated to ${newStatus}`, 'Status Changed');
+    }
+    setOpenActionId(null);
+  };
+
+  const handleChangeUserRole = async (targetUser, newRole) => {
+    const roleUpper = newRole.toUpperCase();
+    try {
+      try {
+        await adminUpdateUserRole(targetUser.id || targetUser.uid, roleUpper);
+      } catch {}
+      try {
+        if (targetUser.uid) {
+          await updateUserRole(targetUser.uid, roleUpper, {
+            name: targetUser.name,
+            email: targetUser.email,
+          });
+        }
+      } catch {}
+      try {
+        if (targetUser.email) {
+          const matches = await getUserProfileByEmail(targetUser.email);
+          for (const m of matches) {
+            if (m.uid && m.uid !== targetUser.uid) {
+              await updateUserRole(m.uid, roleUpper, { email: targetUser.email });
+            }
+          }
+        }
+      } catch {}
+      setUsers((prev) =>
+        prev.map((u) => ((u.uid === targetUser.uid || u.id === targetUser.id) ? { ...u, role: newRole.toLowerCase() } : u))
+      );
+      success(`Role updated to ${newRole.toUpperCase()} for ${targetUser.name || targetUser.email}`, 'Role Updated');
+    } catch (e) {
+      console.error('Role update error:', e);
     }
     setOpenActionId(null);
   };
@@ -751,7 +791,19 @@ export default function AdminWorkspace() {
                           </div>
                         </td>
                         <td>
-                          <span className="badge badge-secondary">{roleLabel(u.role || 'doctor')}</span>
+                          <select
+                            className="input text-xs py-1 px-2 h-7"
+                            value={(u.role || 'patient').toLowerCase()}
+                            onChange={(e) => handleChangeUserRole(u, e.target.value)}
+                          >
+                            <option value="patient">Patient</option>
+                            <option value="doctor">Doctor</option>
+                            <option value="doctor_pending">Doctor Pending</option>
+                            <option value="nurse">Nurse</option>
+                            <option value="lab">Lab Specialist</option>
+                            <option value="pharmacist">Pharmacist</option>
+                            <option value="admin">Admin</option>
+                          </select>
                         </td>
                         <td>
                           <span className={`badge ${u.status === 'Suspended' ? 'badge-danger' : 'badge-success'}`}>

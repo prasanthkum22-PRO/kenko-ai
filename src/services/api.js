@@ -586,6 +586,16 @@ export const adminListUsers = async ({ search, role, page = 1 } = {}) => {
   return res.data;
 };
 
+export const adminUpdateUserRole = async (userId, role) => {
+  const res = await api.patch(`/api/admin/users/${userId}/role`, { role });
+  return res.data;
+};
+
+export const adminUpdateUserStatus = async (userId, status) => {
+  const res = await api.patch(`/api/admin/users/${userId}/status`, { status });
+  return res.data;
+};
+
 export const adminGetAuditLogs = async (page = 1) => {
   const res = await api.get('/api/admin/audit-logs', { params: { page } });
   return res.data;

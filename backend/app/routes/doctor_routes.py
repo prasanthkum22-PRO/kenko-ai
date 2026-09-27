@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, List
+from pydantic import BaseModel
 
 from fastapi import (
     APIRouter, Depends, HTTPException, UploadFile, File,
@@ -1088,3 +1089,108 @@ def admin_audit_logs(
             for l in logs
         ]
     }
+
+
+class AdminUpdateRoleRequest(BaseModel):
+    role: str
+
+
+@router.patch("/admin/users/{user_id}/role", summary="[ADMIN] Update user role")
+def admin_update_user_role(
+    user_id: str,
+    payload: AdminUpdateRoleRequest,
+    admin: User = Depends(require_role(["ADMIN"])),
+    db: Session = Depends(get_db),
+):
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    new_role = payload.role.strip().upper()
+    valid_roles = ["PATIENT", "DOCTOR_PENDING", "DOCTOR", "NURSE", "LAB", "PHARMACIST", "ADMIN"]
+    if new_role not in valid_roles:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of {valid_roles}")
+
+    old_role = target_user.role
+    target_user.role = new_role
+
+    if new_role == "DOCTOR":
+        profile = db.query(DoctorProfile).filter(DoctorProfile.user_id == target_user.id).first()
+        if not profile:
+            profile = DoctorProfile(
+                user_id=target_user.id,
+                specialization="General Medicine",
+                medical_degree="MBBS",
+                verification_status="VERIFIED",
+                verified_by=admin.id,
+                verified_at=datetime.now(timezone.utc),
+            )
+            db.add(profile)
+            db.flush()
+
+    log = AuditLog(
+        user_id=admin.id,
+        action="ADMIN_UPDATE_USER_ROLE",
+        resource_type="user",
+        resource_id=target_user.id,
+        details={"user_email": target_user.email, "old_role": old_role, "new_role": new_role},
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(target_user)
+
+    return {
+        "success": True,
+        "message": f"User role updated to {new_role}",
+        "user": {
+            "id": target_user.id,
+            "email": target_user.email,
+            "full_name": target_user.full_name,
+            "role": target_user.role,
+            "is_active": target_user.is_active,
+        },
+    }
+
+
+class AdminUpdateStatusRequest(BaseModel):
+    status: str
+
+
+@router.patch("/admin/users/{user_id}/status", summary="[ADMIN] Update user status")
+def admin_update_user_status(
+    user_id: str,
+    payload: AdminUpdateStatusRequest,
+    admin: User = Depends(require_role(["ADMIN"])),
+    db: Session = Depends(get_db),
+):
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    status_str = payload.status.strip().upper()
+    is_active = (status_str == "ACTIVE")
+    target_user.is_active = is_active
+
+    log = AuditLog(
+        user_id=admin.id,
+        action="ADMIN_UPDATE_USER_STATUS",
+        resource_type="user",
+        resource_id=target_user.id,
+        details={"user_email": target_user.email, "new_status": "ACTIVE" if is_active else "SUSPENDED"},
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(target_user)
+
+    return {
+        "success": True,
+        "message": f"User status updated to {'ACTIVE' if is_active else 'SUSPENDED'}",
+        "user": {
+            "id": target_user.id,
+            "email": target_user.email,
+            "full_name": target_user.full_name,
+            "role": target_user.role,
+            "is_active": target_user.is_active,
+        },
+    }
+

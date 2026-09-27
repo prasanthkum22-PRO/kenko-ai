@@ -17,16 +17,13 @@
  *  - Returns null when no profile exists (caller decides provisioning).
  */
 export function pickAuthoritativeProfile(profileUid, emailProfiles = []) {
-  const candidates = [];
-  if (profileUid) candidates.push(profileUid);
-  for (const ep of emailProfiles) {
-    if (!profileUid || ep.uid !== profileUid.uid) candidates.push(ep);
+  if (profileUid && profileUid.role) {
+    return profileUid;
   }
-  return (
-    candidates.find((c) => c.role && String(c.role).toLowerCase() !== 'patient') ||
-    candidates[0] ||
-    null
-  );
+  const nonPatientEmail = emailProfiles.find((c) => c.role && String(c.role).toLowerCase() !== 'patient');
+  if (nonPatientEmail) return nonPatientEmail;
+  if (profileUid) return profileUid;
+  return emailProfiles[0] || null;
 }
 
 /** Normalize a stored role to lowercase, or null when unassigned. */

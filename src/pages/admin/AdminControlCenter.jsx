@@ -11,11 +11,15 @@ import {
   adminListPosts,
   adminGetAuditLogs,
   adminListUsers,
+  adminUpdateUserRole,
+  adminUpdateUserStatus,
 } from '../../services/api';
 import {
   listDoctorApplicationsForAdmin,
   getAllUsers,
+  getUserProfileByEmail,
   updateUserStatus,
+  updateUserRole,
   saveUserProfile,
   getAuditLogs as getFirestoreAuditLogs,
 } from '../../services/firestoreService';
@@ -760,6 +764,7 @@ function AdminUsersTab({ navigate, onReload }) {
       const data = await adminListUsers({ search: search || undefined, role: roleFilter || undefined });
       if (data?.users?.length > 0) {
         userList = data.users.map((u) => ({
+          id: u.id,
           uid: String(u.id),
           displayName: u.full_name || u.displayName || u.email?.split('@')[0] || 'User',
           email: u.email,
@@ -775,6 +780,7 @@ function AdminUsersTab({ navigate, onReload }) {
         const fsUsers = await getAllUsers();
         if (fsUsers?.length > 0) {
           userList = fsUsers.map((u) => ({
+            id: u.id || u.uid,
             uid: u.uid,
             displayName: u.displayName || u.name || u.full_name || u.email?.split('@')[0] || 'User',
             email: u.email,
@@ -806,13 +812,27 @@ function AdminUsersTab({ navigate, onReload }) {
 
   const handleToggleStatus = async (userObj) => {
     const nextStatus = userObj.accountStatus === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
-    setUpdatingUid(userObj.uid);
+    setUpdatingUid(userObj.uid || userObj.id);
     try {
-      await updateUserStatus(userObj.uid, nextStatus);
+      try {
+        await adminUpdateUserStatus(userObj.id || userObj.uid, nextStatus);
+      } catch (apiErr) {
+        console.warn('Backend adminUpdateUserStatus skipped/failed:', apiErr?.message);
+      }
+
+      try {
+        if (userObj.uid) {
+          await updateUserStatus(userObj.uid, nextStatus);
+        }
+      } catch (fsErr) {
+        console.warn('Firestore updateUserStatus skipped/failed:', fsErr?.message);
+      }
+
       setUsers((prev) =>
-        prev.map((u) => (u.uid === userObj.uid ? { ...u, accountStatus: nextStatus } : u))
+        prev.map((u) => ((u.uid === userObj.uid || u.id === userObj.id) ? { ...u, accountStatus: nextStatus } : u))
       );
       addToast(`User ${userObj.displayName} is now ${nextStatus}.`, 'success');
+      if (onReload) onReload();
     } catch (e) {
       addToast(`Failed to update status: ${e.message}`, 'error');
     } finally {
@@ -821,14 +841,58 @@ function AdminUsersTab({ navigate, onReload }) {
   };
 
   const handleChangeRole = async (userObj, newRole) => {
-    setUpdatingUid(userObj.uid);
+    setUpdatingUid(userObj.uid || userObj.id);
     try {
-      await saveUserProfile(userObj.uid, { ...userObj, role: newRole });
+      let updated = false;
+
+      // 1. Try Backend REST API update
+      try {
+        await adminUpdateUserRole(userObj.id || userObj.uid, newRole);
+        updated = true;
+      } catch (apiErr) {
+        console.warn('Backend adminUpdateUserRole skipped/failed:', apiErr?.message);
+      }
+
+      // 2. Try Firestore profile update by UID and sync by email
+      try {
+        if (userObj.uid) {
+          await updateUserRole(userObj.uid, newRole, {
+            displayName: userObj.displayName,
+            email: userObj.email,
+            accountStatus: userObj.accountStatus || 'ACTIVE',
+          });
+          updated = true;
+        }
+      } catch (fsErr) {
+        console.warn('Firestore updateUserRole by UID skipped/failed:', fsErr?.message);
+      }
+
+      try {
+        if (userObj.email) {
+          const matching = await getUserProfileByEmail(userObj.email);
+          for (const m of matching) {
+            if (m.uid && m.uid !== userObj.uid) {
+              await updateUserRole(m.uid, newRole, { email: userObj.email });
+              updated = true;
+            }
+          }
+        }
+      } catch (fsEmailErr) {
+        console.warn('Firestore updateUserRole by Email skipped/failed:', fsEmailErr?.message);
+      }
+
+      // 3. Fallback to saveUserProfile if needed
+      if (!updated) {
+        await saveUserProfile(userObj.uid || userObj.id, { ...userObj, role: newRole });
+      }
+
       setUsers((prev) =>
-        prev.map((u) => (u.uid === userObj.uid ? { ...u, role: newRole } : u))
+        prev.map((u) => ((u.uid === userObj.uid || u.id === userObj.id) ? { ...u, role: newRole } : u))
       );
-      addToast(`Role updated to ${newRole} for ${userObj.displayName}.`, 'success');
+      addToast(`Role successfully updated to ${newRole} for ${userObj.displayName}.`, 'success');
+      if (onReload) onReload();
     } catch (e) {
+      console.error('Role change failed:', e);
       addToast(`Failed to update role: ${e.message}`, 'error');
     } finally {
       setUpdatingUid(null);
