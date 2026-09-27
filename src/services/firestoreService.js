@@ -94,13 +94,13 @@ export const submitDoctorApplicationFirestore = async (userId, applicationData) 
   const docRef = doc(collection(db, 'doctorApplications'));
   const payload = {
     id: docRef.id,
-    userId,
-    fullName: applicationData.fullName || applicationData.full_name,
-    email: applicationData.email,
+    userId: String(userId || ''),
+    fullName: applicationData.fullName || applicationData.full_name || '',
+    email: (applicationData.email || '').toLowerCase().trim(),
     phone: applicationData.phone || '',
-    medicalDegree: applicationData.medicalDegree || applicationData.medical_degree,
-    specialization: applicationData.specialization,
-    registrationNumber: applicationData.registrationNumber || applicationData.registration_number,
+    medicalDegree: applicationData.medicalDegree || applicationData.medical_degree || '',
+    specialization: applicationData.specialization || 'General Medicine',
+    registrationNumber: applicationData.registrationNumber || applicationData.registration_number || '',
     yearsOfExperience: Number(applicationData.yearsOfExperience || applicationData.years_of_experience || 0),
     organization: applicationData.organization || '',
     professionalBio: applicationData.professionalBio || applicationData.professional_bio || '',
@@ -115,38 +115,131 @@ export const submitDoctorApplicationFirestore = async (userId, applicationData) 
   };
   await setDoc(docRef, payload);
 
-  // Update user role to DOCTOR_PENDING
-  await updateDoc(doc(db, 'users', userId), {
-    role: 'DOCTOR_PENDING',
-    updatedAt: serverTimestamp(),
-  });
+  // Update user role to DOCTOR_PENDING with merge: true so it never throws if document is new
+  if (userId) {
+    try {
+      await setDoc(
+        doc(db, 'users', String(userId)),
+        {
+          role: 'DOCTOR_PENDING',
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } catch (e) {
+      console.warn('Could not update user role to DOCTOR_PENDING in users doc:', e);
+    }
+  }
+
+  // Cache application ID locally
+  try {
+    localStorage.setItem('kenko_last_doctor_app_id', docRef.id);
+    if (payload.email) localStorage.setItem('kenko_last_doctor_app_email', payload.email);
+  } catch {}
 
   return payload;
 };
 
-export const getMyDoctorApplicationFirestore = async (userId) => {
-  const q = query(
-    collection(db, 'doctorApplications'),
-    where('userId', '==', userId),
-    orderBy('submittedAt', 'desc'),
-    limit(1)
-  );
-  const snap = await getDocs(q);
-  return snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() };
+export const getMyDoctorApplicationFirestore = async (userId, userEmail) => {
+  if (!userId && !userEmail) return null;
+
+  // 1. Try querying by userId without composite index constraint
+  if (userId) {
+    try {
+      const q = query(collection(db, 'doctorApplications'), where('userId', '==', String(userId)));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const apps = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        apps.sort((a, b) => {
+          const tA = a.submittedAt?.toMillis ? a.submittedAt.toMillis() : new Date(a.submittedAt || 0).getTime();
+          const tB = b.submittedAt?.toMillis ? b.submittedAt.toMillis() : new Date(b.submittedAt || 0).getTime();
+          return tB - tA;
+        });
+        return apps[0];
+      }
+    } catch (e) {
+      console.warn('getMyDoctorApplicationFirestore userId query:', e);
+    }
+  }
+
+  // 2. Try querying by email
+  if (userEmail) {
+    try {
+      const em = userEmail.toLowerCase().trim();
+      const q = query(collection(db, 'doctorApplications'), where('email', '==', em));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const apps = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        apps.sort((a, b) => {
+          const tA = a.submittedAt?.toMillis ? a.submittedAt.toMillis() : new Date(a.submittedAt || 0).getTime();
+          const tB = b.submittedAt?.toMillis ? b.submittedAt.toMillis() : new Date(b.submittedAt || 0).getTime();
+          return tB - tA;
+        });
+        return apps[0];
+      }
+    } catch (e) {
+      console.warn('getMyDoctorApplicationFirestore email query:', e);
+    }
+  }
+
+  // 3. Fallback: check cached app ID
+  try {
+    const cachedId = localStorage.getItem('kenko_last_doctor_app_id');
+    if (cachedId) {
+      const snap = await getDoc(doc(db, 'doctorApplications', cachedId));
+      if (snap.exists()) {
+        return { id: snap.id, ...snap.data() };
+      }
+    }
+  } catch {}
+
+  // 4. Scan all applications as final fallback
+  try {
+    const snap = await getDocs(collection(db, 'doctorApplications'));
+    if (!snap.empty) {
+      const matches = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter(
+          (d) =>
+            (userId && String(d.userId) === String(userId)) ||
+            (userEmail && d.email?.toLowerCase().trim() === userEmail.toLowerCase().trim())
+        );
+      if (matches.length > 0) {
+        matches.sort((a, b) => {
+          const tA = a.submittedAt?.toMillis ? a.submittedAt.toMillis() : new Date(a.submittedAt || 0).getTime();
+          const tB = b.submittedAt?.toMillis ? b.submittedAt.toMillis() : new Date(b.submittedAt || 0).getTime();
+          return tB - tA;
+        });
+        return matches[0];
+      }
+    }
+  } catch (e) {
+    console.warn('getMyDoctorApplicationFirestore scan error:', e);
+  }
+
+  return null;
 };
 
-export const listDoctorApplicationsForAdmin = async ({ statusFilter = null, pageSize = 20, lastDoc = null } = {}) => {
-  const constraints = [];
-  if (statusFilter) constraints.push(where('status', '==', statusFilter.toUpperCase()));
-  constraints.push(orderBy('submittedAt', 'desc'));
-  if (lastDoc) constraints.push(startAfter(lastDoc));
-  constraints.push(limit(pageSize));
-
-  const snap = await getDocs(query(collection(db, 'doctorApplications'), ...constraints));
-  return {
-    applications: snap.docs.map((d) => ({ id: d.id, ...d.data() })),
-    lastDoc: snap.docs[snap.docs.length - 1] || null,
-  };
+export const listDoctorApplicationsForAdmin = async ({ statusFilter = null, pageSize = 50 } = {}) => {
+  try {
+    const snap = await getDocs(collection(db, 'doctorApplications'));
+    let apps = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (statusFilter) {
+      apps = apps.filter((a) => String(a.status).toUpperCase() === statusFilter.toUpperCase());
+    }
+    apps.sort((a, b) => {
+      const tA = a.submittedAt?.toMillis ? a.submittedAt.toMillis() : new Date(a.submittedAt || 0).getTime();
+      const tB = b.submittedAt?.toMillis ? b.submittedAt.toMillis() : new Date(b.submittedAt || 0).getTime();
+      return tB - tA;
+    });
+    return {
+      applications: apps.slice(0, pageSize),
+      lastDoc: null,
+    };
+  } catch (e) {
+    console.warn('listDoctorApplicationsForAdmin error:', e);
+    return { applications: [], lastDoc: null };
+  }
 };
 
 export const approveDoctorApplicationFirestore = async (applicationId, adminUser) => {

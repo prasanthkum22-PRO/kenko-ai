@@ -197,7 +197,7 @@ def get_my_application(
     db: Session = Depends(get_db),
 ):
     app = db.query(DoctorApplication).filter(
-        DoctorApplication.user_id == current_user.id
+        (DoctorApplication.user_id == current_user.id) | (DoctorApplication.email.ilike(current_user.email))
     ).order_by(DoctorApplication.submitted_at.desc()).first()
 
     if not app:

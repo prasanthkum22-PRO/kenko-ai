@@ -57,6 +57,10 @@ export default function DoctorApplicationStatusPage() {
     let active = true;
     async function fetchStatus() {
       setLoading(true);
+      const uid = user?.uid || user?.id || '';
+      const email = user?.email || localStorage.getItem('kenko_last_doctor_app_email') || '';
+
+      // 1. Try FastAPI REST backend
       try {
         const data = await getMyDoctorApplication();
         if (active && data?.application) {
@@ -64,27 +68,30 @@ export default function DoctorApplicationStatusPage() {
           setLoading(false);
           return;
         }
-      } catch {}
+      } catch (e) {
+        console.warn('API getMyDoctorApplication error:', e);
+      }
 
-      if (user?.uid || user?.id) {
-        try {
-          const fsApp = await getMyDoctorApplicationFirestore(user.uid || user.id);
-          if (active && fsApp) {
-            setApp({
-              id: fsApp.id,
-              status: fsApp.status,
-              full_name: fsApp.fullName,
-              email: fsApp.email,
-              specialization: fsApp.specialization,
-              medical_degree: fsApp.medicalDegree,
-              registration_number: fsApp.registrationNumber,
-              submitted_at: fsApp.submittedAt?.toDate ? fsApp.submittedAt.toDate().toISOString() : fsApp.submittedAt,
-              review_message: fsApp.reviewMessage,
-            });
-            setLoading(false);
-            return;
-          }
-        } catch {}
+      // 2. Try Firestore using uid or email or local cache
+      try {
+        const fsApp = await getMyDoctorApplicationFirestore(uid, email);
+        if (active && fsApp) {
+          setApp({
+            id: fsApp.id,
+            status: fsApp.status || 'PENDING',
+            full_name: fsApp.fullName || fsApp.full_name || 'Doctor Applicant',
+            email: fsApp.email || email,
+            specialization: fsApp.specialization || 'General Medicine',
+            medical_degree: fsApp.medicalDegree || fsApp.medical_degree || 'MBBS / MD',
+            registration_number: fsApp.registrationNumber || fsApp.registration_number || 'REG-PENDING',
+            submitted_at: fsApp.submittedAt?.toDate ? fsApp.submittedAt.toDate().toISOString() : fsApp.submittedAt,
+            review_message: fsApp.reviewMessage,
+          });
+          setLoading(false);
+          return;
+        }
+      } catch (e) {
+        console.warn('Firestore getMyDoctorApplicationFirestore error:', e);
       }
 
       if (active) setLoading(false);
