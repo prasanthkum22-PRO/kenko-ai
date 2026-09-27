@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getDoctorWorkspace, getAppointments } from '../../services/api';
+import { getDoctorWorkspace } from '../../services/api';
 import {
   listUserAppointmentsFirestore,
   listenToUserAppointmentsFirestore,
-  updateAppointmentFirestore,
 } from '../../services/firestoreService';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -13,13 +12,67 @@ import {
   IconStethoscope,
   IconClock,
   IconCheck,
-  IconUsers,
   IconVideo,
   IconMic,
   IconArrowRight,
   IconDoc,
   IconCalendar,
 } from '../../components/icons';
+
+function formatScheduledDate(rawDate) {
+  if (!rawDate) return 'Scheduled';
+  try {
+    let dateObj = null;
+    if (rawDate && typeof rawDate.toDate === 'function') {
+      dateObj = rawDate.toDate();
+    } else if (rawDate && typeof rawDate.seconds === 'number') {
+      dateObj = new Date(rawDate.seconds * 1000);
+    } else if (typeof rawDate === 'string' || typeof rawDate === 'number') {
+      dateObj = new Date(rawDate);
+    }
+
+    if (dateObj && !isNaN(dateObj.getTime())) {
+      return dateObj.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+    }
+    return typeof rawDate === 'string' ? rawDate : 'Scheduled';
+  } catch {
+    return 'Scheduled';
+  }
+}
+
+function normalizeAppointment(a) {
+  if (!a || typeof a !== 'object') return null;
+  let scheduledAtIso = '';
+  if (a.scheduledStart?.toDate) {
+    try { scheduledAtIso = a.scheduledStart.toDate().toISOString(); } catch {}
+  } else if (typeof a.scheduledStart?.seconds === 'number') {
+    try { scheduledAtIso = new Date(a.scheduledStart.seconds * 1000).toISOString(); } catch {}
+  } else if (typeof a.scheduledStart === 'string') {
+    scheduledAtIso = a.scheduledStart;
+  } else if (typeof a.scheduled_at === 'string') {
+    scheduledAtIso = a.scheduled_at;
+  }
+
+  return {
+    id: String(a.id || Math.random()),
+    patientId: String(a.patientId || a.patient_id || ''),
+    patientName: typeof a.patientName === 'string' ? a.patientName : (typeof a.patient_name === 'string' ? a.patient_name : 'Patient'),
+    patientAge: a.patientAge || a.patient_age || null,
+    patientGender: typeof a.patientGender === 'string' ? a.patientGender : (typeof a.patient_gender === 'string' ? a.patient_gender : ''),
+    doctorId: String(a.doctorId || a.doctor_id || ''),
+    doctorName: typeof a.doctorName === 'string' ? a.doctorName : (typeof a.doctor_name === 'string' ? a.doctor_name : 'Dr. Specialist'),
+    appointmentType: String(a.consultationType || a.appointment_type || 'video').toLowerCase(),
+    scheduledAt: scheduledAtIso,
+    reason: typeof a.reason === 'string' ? a.reason : 'General Consultation',
+    status: String(a.status || 'SCHEDULED').toUpperCase(),
+  };
+}
 
 function formatDuration(totalSeconds = 0) {
   const mins = Math.floor(totalSeconds / 60);
@@ -57,26 +110,19 @@ export default function DoctorDashboard() {
       setLoading(true);
       try {
         const data = await getDoctorWorkspace().catch(() => null);
-        if (active && data) setWorkspace(data);
+        if (active && data && typeof data === 'object') setWorkspace(data);
 
         // Load appointments directly from Firebase Firestore (Pure Firebase)
         try {
           const fsAppts = await listUserAppointmentsFirestore(user?.uid, 'doctor');
-          const normalizedFs = (fsAppts || []).map((a) => ({
-            id: a.id,
-            patientId: a.patientId || a.patient_id,
-            patientName: a.patientName || a.patient_name || 'Patient',
-            patientAge: a.patientAge || a.patient_age,
-            patientGender: a.patientGender || a.patient_gender,
-            doctorId: a.doctorId || a.doctor_id,
-            doctorName: a.doctorName || a.doctor_name || 'Dr. Specialist',
-            appointmentType: (a.consultationType || a.appointment_type || 'video').toLowerCase(),
-            scheduledAt: a.scheduledStart?.toDate ? a.scheduledStart.toDate().toISOString() : (a.scheduledStart || a.scheduled_at),
-            reason: a.reason || 'General Consultation',
-            status: (a.status || 'SCHEDULED').toUpperCase(),
-          })).sort((a, b) => new Date(b.scheduledAt || 0) - new Date(a.scheduledAt || 0));
+          if (active && Array.isArray(fsAppts)) {
+            const normalizedFs = fsAppts
+              .map(normalizeAppointment)
+              .filter(Boolean)
+              .sort((a, b) => new Date(b.scheduledAt || 0) - new Date(a.scheduledAt || 0));
 
-          if (active) setAppointments(normalizedFs);
+            setAppointments(normalizedFs);
+          }
         } catch (fsErr) {
           console.warn('Firestore fetch error in DoctorDashboard:', fsErr);
         }
@@ -95,19 +141,10 @@ export default function DoctorDashboard() {
         if (!active) return;
         setIsRealtimeActive(true);
         if (Array.isArray(liveList)) {
-          const normalized = liveList.map((f) => ({
-            id: f.id,
-            patientId: f.patientId || f.patient_id,
-            patientName: f.patientName || f.patient_name || 'Patient',
-            patientAge: f.patientAge || f.patient_age,
-            patientGender: f.patientGender || f.patient_gender,
-            doctorId: f.doctorId || f.doctor_id,
-            doctorName: f.doctorName || f.doctor_name || 'Dr. Specialist',
-            appointmentType: (f.consultationType || f.appointment_type || 'video').toLowerCase(),
-            scheduledAt: f.scheduledStart?.toDate ? f.scheduledStart.toDate().toISOString() : (f.scheduledStart || f.scheduled_at),
-            reason: f.reason || 'General Consultation',
-            status: (f.status || 'SCHEDULED').toUpperCase(),
-          })).sort((a, b) => new Date(b.scheduledAt || 0) - new Date(a.scheduledAt || 0));
+          const normalized = liveList
+            .map(normalizeAppointment)
+            .filter(Boolean)
+            .sort((a, b) => new Date(b.scheduledAt || 0) - new Date(a.scheduledAt || 0));
 
           setAppointments(normalized);
         }
@@ -122,16 +159,19 @@ export default function DoctorDashboard() {
     };
   }, [user?.uid]);
 
-  const metrics = workspace?.metrics || {};
-  const recent = workspace?.recent_consultations || [];
+  const safeAppointments = Array.isArray(appointments) ? appointments : [];
+  const metrics = (workspace && typeof workspace === 'object' && workspace.metrics) || {};
+  const recent = (workspace && typeof workspace === 'object' && Array.isArray(workspace.recent_consultations))
+    ? workspace.recent_consultations
+    : [];
   const pending = recent.filter((c) => !c.is_approved).length;
-  const activeAppointments = appointments.filter(
+  const activeAppointments = safeAppointments.filter(
     (a) => a.status !== 'CANCELLED' && a.status !== 'COMPLETED'
   );
 
   if (loading) {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-6" id="doctor-dashboard-loading">
         <div className="skeleton skeleton-text" style={{ width: 260, height: 30 }} />
         <div className="kpi-grid">
           {[0, 1, 2, 3].map((i) => (
@@ -238,7 +278,7 @@ export default function DoctorDashboard() {
           </button>
         </div>
         <div style={{ padding: 18 }}>
-          {appointments.length === 0 ? (
+          {safeAppointments.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon">
                 <IconCalendar />
@@ -265,22 +305,9 @@ export default function DoctorDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {appointments.slice(0, 6).map((a) => {
+                  {safeAppointments.slice(0, 6).map((a) => {
                     const isVideo = a.appointmentType === 'video';
-                    let formattedDate = 'Scheduled';
-                    if (a.scheduledAt) {
-                      try {
-                        formattedDate = new Date(a.scheduledAt).toLocaleString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          hour: 'numeric',
-                          minute: '2-digit',
-                          hour12: true,
-                        });
-                      } catch {
-                        formattedDate = String(a.scheduledAt);
-                      }
-                    }
+                    const formattedDate = formatScheduledDate(a.scheduledAt);
 
                     return (
                       <tr key={a.id}>
@@ -375,9 +402,9 @@ export default function DoctorDashboard() {
                   {recent.map((c) => (
                     <tr key={c.id}>
                       <td>
-                        <span className="font-semibold">{c.patient_name}</span>
+                        <span className="font-semibold">{c.patient_name || 'Patient'}</span>
                         <span className="text-muted font-mono" style={{ display: 'block', fontSize: 12 }}>
-                          {c.patient_id}
+                          {c.patient_id || ''}
                         </span>
                       </td>
                       <td>

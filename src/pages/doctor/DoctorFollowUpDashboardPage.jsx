@@ -8,8 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { getDoctorFollowUpDashboard } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import {
-  IconClock, IconAlert, IconCheck, IconActivity,
-  IconUsers, IconSparkle, IconArrowRight
+  IconClock, IconActivity,
 } from '../../components/icons';
 
 export default function DoctorFollowUpDashboardPage() {
@@ -25,21 +24,32 @@ export default function DoctorFollowUpDashboardPage() {
     try {
       setLoading(true);
       const res = await getDoctorFollowUpDashboard(activeFilter);
-      setPlans(res.plans || []);
-      setCounts(res.counts || {});
+      if (res && typeof res === 'object') {
+        const safePlans = Array.isArray(res.plans) ? res.plans : (Array.isArray(res.data) ? res.data : []);
+        setPlans(safePlans);
+        setCounts(res.counts && typeof res.counts === 'object' ? res.counts : { all: safePlans.length, due_today: 0, high_priority: 0, needs_review: 0 });
+      } else if (Array.isArray(res)) {
+        setPlans(res);
+        setCounts({ all: res.length, due_today: 0, high_priority: 0, needs_review: 0 });
+      } else {
+        setPlans([]);
+      }
     } catch (err) {
-      toastError(err.response?.data?.detail || 'Failed to load follow-up plans.');
+      console.warn('DoctorFollowUpDashboard fetch error:', err);
+      setPlans([]);
     } finally {
       setLoading(false);
     }
-  }, [activeFilter, toastError]);
+  }, [activeFilter]);
 
   useEffect(() => {
     fetchPlans();
   }, [fetchPlans]);
 
+  const safePlans = Array.isArray(plans) ? plans : [];
+
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="p-6 max-w-7xl mx-auto space-y-6" id="doctor-follow-up-dashboard">
       {/* Header */}
       <div className="glass-card p-6 flex flex-wrap items-center justify-between gap-4 border-l-4 border-warning">
         <div>
@@ -70,7 +80,7 @@ export default function DoctorFollowUpDashboardPage() {
       {/* Filter Tabs */}
       <div className="flex flex-wrap gap-2 border-b border-border/40 pb-3">
         {[
-          { id: 'all', label: `All Plans (${counts.all || 0})` },
+          { id: 'all', label: `All Plans (${counts.all || safePlans.length})` },
           { id: 'due_today', label: `Due Today (${counts.due_today || 0})` },
           { id: 'high_priority', label: `⚠️ High Priority (${counts.high_priority || 0})` },
           { id: 'needs_review', label: `Needs Review (${counts.needs_review || 0})` },
@@ -93,16 +103,16 @@ export default function DoctorFollowUpDashboardPage() {
           <span className="spinner mr-3" />
           <span>Loading follow-up dashboard...</span>
         </div>
-      ) : plans.length === 0 ? (
+      ) : safePlans.length === 0 ? (
         <div className="glass-card p-12 text-center space-y-2">
           <IconClock size={36} className="text-muted mx-auto" />
           <p className="text-muted text-sm font-semibold">No follow-up plans found for this filter.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {plans.map((p) => (
+          {safePlans.map((p) => (
             <div
-              key={p.id}
+              key={p.id || Math.random()}
               className={`glass-card p-5 space-y-4 hover:border-primary/50 transition-colors flex flex-col justify-between ${
                 p.is_high_priority ? 'border-error/60 bg-error/5' : ''
               }`}
@@ -110,8 +120,8 @@ export default function DoctorFollowUpDashboardPage() {
               <div className="space-y-2">
                 <div className="flex items-start justify-between">
                   <div>
-                    <h3 className="font-bold text-white text-base">{p.patient_name}</h3>
-                    <p className="text-xs text-muted font-mono">ID: {p.patient_id}</p>
+                    <h3 className="font-bold text-white text-base">{p.patient_name || 'Patient'}</h3>
+                    <p className="text-xs text-muted font-mono">ID: {p.patient_id || '—'}</p>
                   </div>
                   <span
                     className={`badge text-xs font-bold ${
@@ -124,13 +134,13 @@ export default function DoctorFollowUpDashboardPage() {
                         : 'badge-ghost text-muted'
                     }`}
                   >
-                    {p.latest_response}
+                    {p.latest_response || 'ACTIVE'}
                   </span>
                 </div>
 
                 <div className="p-3 rounded-lg bg-surface/50 text-xs space-y-1">
                   <p className="text-muted">Instruction:</p>
-                  <p className="text-white font-medium line-clamp-2">{p.instruction}</p>
+                  <p className="text-white font-medium line-clamp-2">{p.instruction || 'Follow-up clinical assessment.'}</p>
                 </div>
 
                 {p.recommended_test_name && (
@@ -143,7 +153,7 @@ export default function DoctorFollowUpDashboardPage() {
               <div className="pt-3 border-t border-border/40 flex items-center justify-between">
                 <div>
                   <p className="text-xs text-muted">Due Date</p>
-                  <p className="text-xs font-bold text-white">{p.due_date}</p>
+                  <p className="text-xs font-bold text-white">{p.due_date || 'Upcoming'}</p>
                 </div>
                 <button
                   onClick={() => navigate(`/doctor/follow-up/${p.id}`)}

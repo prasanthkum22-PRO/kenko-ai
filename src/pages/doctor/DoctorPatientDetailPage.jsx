@@ -15,7 +15,7 @@ import {
 
 export default function DoctorPatientDetailPage() {
   const { patientId } = useParams();
-  const { addToast } = useToast();
+  const { error: toastError, success: toastSuccess } = useToast();
 
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
@@ -32,7 +32,7 @@ export default function DoctorPatientDetailPage() {
       setData(res);
     } catch (err) {
       console.error('Failed to load patient detail:', err);
-      addToast('Failed to load patient clinical profile or unauthorized access.', 'error');
+      toastError(err?.response?.data?.detail || err?.message || 'Failed to load patient clinical profile or unauthorized access.', 'Profile Note');
     } finally {
       setLoading(false);
     }
@@ -109,8 +109,12 @@ export default function DoctorPatientDetailPage() {
           </div>
 
           <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <Link to="/consultations/video" className="btn btn-primary btn-sm" style={{ textDecoration: 'none' }}>
-              Launch Consultation
+            <Link
+              to={`/consultations/video?patientId=${patient?.id || patientId}&patientName=${encodeURIComponent(patient?.name || 'Patient')}`}
+              className="btn btn-primary btn-sm"
+              style={{ textDecoration: 'none' }}
+            >
+              <IconVideo size={14} style={{ marginRight: 6 }} /> Launch Consultation
             </Link>
           </div>
         </div>

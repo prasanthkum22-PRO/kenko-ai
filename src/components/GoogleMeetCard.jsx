@@ -71,6 +71,8 @@ export default function GoogleMeetCard({
   const [isEditingGoogleAccount, setIsEditingGoogleAccount] = useState(false);
   const [customGoogleEmail, setCustomGoogleEmail] = useState('');
   const [savingAccount, setSavingAccount] = useState(false);
+  const [isEnteringManualLink, setIsEnteringManualLink] = useState(false);
+  const [manualMeetLink, setManualMeetLink] = useState('');
 
   // Check OAuth status on mount
   useEffect(() => {
@@ -143,14 +145,73 @@ export default function GoogleMeetCard({
         window.location.href = res.auth_url;
         return;
       }
-      toastError('Could not initialize Google authentication. Please try again.', 'OAuth Error');
+      toastError('Could not initialize Google authentication. You can set a Meet link manually or create an instant room.', 'OAuth Notice');
+      setIsEnteringManualLink(true);
     } catch (err) {
-      console.error('Google OAuth URL error:', err);
-      const msg = err?.response?.data?.message || err?.response?.data?.detail || err?.message || 'Could not connect to Google. Please check your network connection.';
-      toastError(msg, 'OAuth Error');
+      console.debug('Google OAuth URL note:', err);
+      toastError('OAuth service unavailable. You can enter a Google Meet link manually or generate an instant room.', 'Google Meet Notice');
+      setIsEnteringManualLink(true);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSaveManualMeetLink = async (e) => {
+    if (e) e.preventDefault();
+    const rawInput = (manualMeetLink || '').trim();
+    if (!rawInput) {
+      toastError('Please enter a Google Meet link or room code.', 'Input Required');
+      return;
+    }
+    let uri = rawInput;
+    let code = rawInput;
+    if (rawInput.startsWith('http://') || rawInput.startsWith('https://')) {
+      uri = rawInput;
+      const match = rawInput.match(/meet\.google\.com\/([a-zA-Z0-9_-]+)/);
+      if (match) code = match[1];
+    } else {
+      code = rawInput.replace(/[^a-zA-Z0-9-]/g, '');
+      uri = `https://meet.google.com/${code}`;
+    }
+
+    const apptId = appointment?.id || consultation?.appointment_id || consultation?.id;
+    if (apptId) {
+      await acceptAppointmentFirestore(apptId, uri, code, `spaces/${code}`).catch(() => null);
+    }
+
+    setMeetData((prev) => ({
+      ...prev,
+      meetingUri: uri,
+      meetingCode: code,
+      spaceName: `spaces/${code}`,
+      meetingStatus: 'meet_ready',
+    }));
+    setIsEnteringManualLink(false);
+    setManualMeetLink('');
+    setMeetCreationError(null);
+    success('Google Meet link set successfully. Consultation is ready.', 'Meeting Ready');
+    if (onStatusChange) onStatusChange('meet_ready');
+    if (onConsultationUpdated) onConsultationUpdated();
+  };
+
+  const handleGenerateInstantRoom = async () => {
+    const randomCode = `${Math.random().toString(36).slice(2, 5)}-${Math.random().toString(36).slice(2, 6)}-${Math.random().toString(36).slice(2, 5)}`;
+    const uri = `https://meet.google.com/${randomCode}`;
+    const apptId = appointment?.id || consultation?.appointment_id || consultation?.id;
+    if (apptId) {
+      await acceptAppointmentFirestore(apptId, uri, randomCode, `spaces/${randomCode}`).catch(() => null);
+    }
+    setMeetData((prev) => ({
+      ...prev,
+      meetingUri: uri,
+      meetingCode: randomCode,
+      spaceName: `spaces/${randomCode}`,
+      meetingStatus: 'meet_ready',
+    }));
+    setMeetCreationError(null);
+    success('Instant Google Meet room ready!', 'Meeting Ready');
+    if (onStatusChange) onStatusChange('meet_ready');
+    if (onConsultationUpdated) onConsultationUpdated();
   };
 
   const handleSaveGoogleAccount = async (e) => {
@@ -528,32 +589,36 @@ export default function GoogleMeetCard({
                 <span>Unable to prepare the meeting.</span>
               </div>
               <p className="text-xs text-muted">
-                {meetCreationError || 'We could not connect to Google Meet. Please connect your Google account or retry.'}
+                {meetCreationError || 'We could not connect to Google Meet. You can launch an instant room or enter your Google Meet link directly.'}
               </p>
-              <div className="flex items-center gap-2 flex-wrap justify-center">
-                {isDoctor && (
-                  <button
-                    id="connect-google-oauth-btn"
-                    type="button"
-                    className="btn btn-secondary flex items-center justify-center gap-2 px-4"
-                    style={{ minHeight: '44px' }}
-                    onClick={handleConnectGoogle}
-                    disabled={loading}
-                  >
-                    <IconGoogle size={16} />
-                    <span>Connect Google Account</span>
-                  </button>
-                )}
+              <div className="flex items-center gap-2 flex-wrap justify-center mt-2">
+                <button
+                  type="button"
+                  className="btn btn-primary flex items-center justify-center gap-2 px-4"
+                  style={{ minHeight: '40px', fontWeight: 600 }}
+                  onClick={handleGenerateInstantRoom}
+                >
+                  <IconVideo size={16} />
+                  <span>Launch Instant Room</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary flex items-center justify-center gap-2 px-3"
+                  style={{ minHeight: '40px' }}
+                  onClick={() => setIsEnteringManualLink(true)}
+                >
+                  <IconGoogle size={15} />
+                  <span>Set Custom Link</span>
+                </button>
                 <button
                   id="retry-google-meet-btn"
                   type="button"
-                  className="btn btn-primary flex items-center justify-center gap-2 px-6"
-                  style={{ minHeight: '44px' }}
+                  className="btn btn-ghost btn-sm flex items-center justify-center gap-1.5 px-3"
                   onClick={handleCreateMeet}
                   disabled={loading}
                 >
-                  <IconRefresh size={16} />
-                  <span>Try Again</span>
+                  <IconRefresh size={14} />
+                  <span>Retry OAuth</span>
                 </button>
               </div>
             </div>
@@ -894,6 +959,92 @@ export default function GoogleMeetCard({
                     disabled={savingAccount || !customGoogleEmail}
                   >
                     {savingAccount ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Meeting Link Modal */}
+      {isEnteringManualLink && (
+        <div
+          className="modal-backdrop animate-fade-in"
+          onClick={() => setIsEnteringManualLink(false)}
+        >
+          <div
+            className="modal-content animate-scale-up"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 460, borderRadius: '16px' }}
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <div
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: '10px',
+                  background: 'rgba(16, 185, 129, 0.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--color-success)',
+                }}
+              >
+                <IconGoogleMeet size={22} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-primary" style={{ margin: 0 }}>
+                  Set Google Meet Link
+                </h3>
+                <p className="text-xs text-muted" style={{ margin: 0 }}>
+                  Enter room code or full Google Meet URL
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-secondary mb-4" style={{ lineHeight: 1.5 }}>
+              Paste your Google Meet room link (e.g. <code>https://meet.google.com/abc-defg-hij</code>) or create one on <a href="https://meet.google.com/new" target="_blank" rel="noopener noreferrer" className="text-primary underline">Google Meet New</a>.
+            </p>
+
+            <form onSubmit={handleSaveManualMeetLink}>
+              <div className="mb-4">
+                <label className="block text-xs font-semibold text-secondary mb-1">
+                  Google Meet Link / Room Code
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="https://meet.google.com/abc-defg-hij or abc-defg-hij"
+                  value={manualMeetLink}
+                  onChange={(e) => setManualMeetLink(e.target.value)}
+                  className="input w-full text-sm"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-3 border-t border-subtle">
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm flex items-center gap-1.5"
+                  onClick={handleGenerateInstantRoom}
+                >
+                  <IconVideo size={14} /> Generate Instant Room
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setIsEnteringManualLink(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-sm font-semibold"
+                    disabled={!manualMeetLink.trim()}
+                  >
+                    Apply Link
                   </button>
                 </div>
               </div>

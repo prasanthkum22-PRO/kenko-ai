@@ -7,6 +7,7 @@ import { ThemeProvider } from './context/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import RoleGuard from './components/RoleGuard';
 import AppLayout from './layouts/AppLayout';
+import ErrorBoundary from './components/ErrorBoundary';
 import { roleHome } from './config/navigation';
 
 // Lazy-loaded pages (route-level code splitting)
@@ -92,321 +93,323 @@ function RoleHomeRedirect() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <ThemeProvider>
-        <ToastProvider>
-          <AuthProvider>
-            <RoleProvider>
-              <Suspense fallback={<RouteFallback />}>
-                <Routes>
-                  {/* Public routes */}
-                  <Route path="/landing" element={<LandingPage />} />
-                  <Route path="/login" element={<LoginPage />} />
-                  <Route path="/register" element={<RegisterPage />} />
+    <ErrorBoundary>
+      <BrowserRouter>
+        <ThemeProvider>
+          <ToastProvider>
+            <AuthProvider>
+              <RoleProvider>
+                <Suspense fallback={<RouteFallback />}>
+                  <Routes>
+                    {/* Public routes */}
+                    <Route path="/landing" element={<LandingPage />} />
+                    <Route path="/login" element={<LoginPage />} />
+                    <Route path="/register" element={<RegisterPage />} />
 
-                  {/* Dedicated role login pages */}
-                  <Route path="/login/admin" element={<RoleLoginPage roleKey="admin" />} />
-                  <Route path="/admin/login" element={<RoleLoginPage roleKey="admin" />} />
-                  <Route path="/login/doctor" element={<RoleLoginPage roleKey="doctor" />} />
-                  <Route path="/doctor/login" element={<RoleLoginPage roleKey="doctor" />} />
-                  <Route path="/login/nurse" element={<RoleLoginPage roleKey="nurse" />} />
-                  <Route path="/nurse/login" element={<RoleLoginPage roleKey="nurse" />} />
-                  <Route path="/login/lab" element={<RoleLoginPage roleKey="lab" />} />
-                  <Route path="/lab/login" element={<RoleLoginPage roleKey="lab" />} />
-                  <Route path="/login/pharmacy" element={<RoleLoginPage roleKey="pharmacist" />} />
-                  <Route path="/pharmacy/login" element={<RoleLoginPage roleKey="pharmacist" />} />
-                  <Route path="/login/patient" element={<RoleLoginPage roleKey="patient" />} />
-                  <Route path="/patient/login" element={<RoleLoginPage roleKey="patient" />} />
+                    {/* Dedicated role login pages */}
+                    <Route path="/login/admin" element={<RoleLoginPage roleKey="admin" />} />
+                    <Route path="/admin/login" element={<RoleLoginPage roleKey="admin" />} />
+                    <Route path="/login/doctor" element={<RoleLoginPage roleKey="doctor" />} />
+                    <Route path="/doctor/login" element={<RoleLoginPage roleKey="doctor" />} />
+                    <Route path="/login/nurse" element={<RoleLoginPage roleKey="nurse" />} />
+                    <Route path="/nurse/login" element={<RoleLoginPage roleKey="nurse" />} />
+                    <Route path="/login/lab" element={<RoleLoginPage roleKey="lab" />} />
+                    <Route path="/lab/login" element={<RoleLoginPage roleKey="lab" />} />
+                    <Route path="/login/pharmacy" element={<RoleLoginPage roleKey="pharmacist" />} />
+                    <Route path="/pharmacy/login" element={<RoleLoginPage roleKey="pharmacist" />} />
+                    <Route path="/login/patient" element={<RoleLoginPage roleKey="patient" />} />
+                    <Route path="/patient/login" element={<RoleLoginPage roleKey="patient" />} />
 
-                  {/* Protected app shell */}
-                  <Route
-                    element={
-                      <ProtectedRoute>
-                        <AppLayout />
-                      </ProtectedRoute>
-                    }
-                  >
+                    {/* Protected app shell */}
                     <Route
-                      path="/admin"
                       element={
-                        <RoleGuard allowedRoles={['admin']}>
-                          <AdminWorkspace />
-                        </RoleGuard>
+                        <ProtectedRoute>
+                          <AppLayout />
+                        </ProtectedRoute>
                       }
-                    />
-                    <Route
-                      path="/doctor"
-                      element={
-                        <RoleGuard allowedRoles={['doctor', 'admin']}>
-                          <DoctorWorkspace />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/nurse"
-                      element={
-                        <RoleGuard allowedRoles={['nurse', 'doctor', 'admin']}>
-                          <NurseDashboard />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/lab"
-                      element={
-                        <RoleGuard allowedRoles={['lab', 'admin']}>
-                          <LabWorkspace />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/pharmacy"
-                      element={
-                        <RoleGuard allowedRoles={['pharmacist', 'admin']}>
-                          <PharmacyWorkspace />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/patient/workspace"
-                      element={
-                        <RoleGuard allowedRoles={['patient', 'admin']}>
-                          <PatientWorkspace />
-                        </RoleGuard>
-                      }
-                    />
+                    >
+                      <Route
+                        path="/admin"
+                        element={
+                          <RoleGuard allowedRoles={['admin']}>
+                            <AdminWorkspace />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/doctor"
+                        element={
+                          <RoleGuard allowedRoles={['doctor', 'admin']}>
+                            <DoctorWorkspace />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/nurse"
+                        element={
+                          <RoleGuard allowedRoles={['nurse', 'doctor', 'admin']}>
+                            <NurseDashboard />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/lab"
+                        element={
+                          <RoleGuard allowedRoles={['lab', 'admin']}>
+                            <LabWorkspace />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/pharmacy"
+                        element={
+                          <RoleGuard allowedRoles={['pharmacist', 'admin']}>
+                            <PharmacyWorkspace />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/patient/workspace"
+                        element={
+                          <RoleGuard allowedRoles={['patient', 'admin']}>
+                            <PatientWorkspace />
+                          </RoleGuard>
+                        }
+                      />
 
-                    {/* Shared clinical workflows */}
-                    <Route path="/dashboard" element={<RoleHomeRedirect />} />
-                    <Route path="/appointments" element={<AppointmentsPage />} />
-                    <Route path="/appointments/book" element={<AppointmentsPage />} />
-                    <Route path="/appointments/:id" element={<AppointmentsPage />} />
-                    <Route path="/consultations" element={<ConsultationsHubPage />} />
-                    <Route path="/consultations/video" element={<VideoConsultationPage />} />
-                    <Route path="/consultations/in-person" element={<InPersonConsultationPage />} />
-                    <Route path="/consultations/:id" element={<ConsultationWorkspacePage />} />
-                    <Route path="/prescriptions" element={<PrescriptionStudioPage />} />
-                    <Route path="/ocr" element={<OCRPage />} />
-                    <Route path="/followups" element={<FollowUpHubPage />} />
+                      {/* Shared clinical workflows */}
+                      <Route path="/dashboard" element={<RoleHomeRedirect />} />
+                      <Route path="/appointments" element={<AppointmentsPage />} />
+                      <Route path="/appointments/book" element={<AppointmentsPage />} />
+                      <Route path="/appointments/:id" element={<AppointmentsPage />} />
+                      <Route path="/consultations" element={<ConsultationsHubPage />} />
+                      <Route path="/consultations/video" element={<VideoConsultationPage />} />
+                      <Route path="/consultations/in-person" element={<InPersonConsultationPage />} />
+                      <Route path="/consultations/:id" element={<ConsultationWorkspacePage />} />
+                      <Route path="/prescriptions" element={<PrescriptionStudioPage />} />
+                      <Route path="/ocr" element={<OCRPage />} />
+                      <Route path="/followups" element={<FollowUpHubPage />} />
 
-                    {/* Doctor Application & Status */}
-                    <Route
-                      path="/apply-doctor"
-                      element={
-                        <RoleGuard allowedRoles={['patient', 'admin']}>
-                          <ApplyDoctorPage />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route path="/apply-doctor/status" element={<DoctorApplicationStatusPage />} />
-                    <Route path="/doctor-application-status" element={<Navigate to="/apply-doctor/status" replace />} />
+                      {/* Doctor Application & Status */}
+                      <Route
+                        path="/apply-doctor"
+                        element={
+                          <RoleGuard allowedRoles={['patient', 'admin']}>
+                            <ApplyDoctorPage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route path="/apply-doctor/status" element={<DoctorApplicationStatusPage />} />
+                      <Route path="/doctor-application-status" element={<Navigate to="/apply-doctor/status" replace />} />
 
-                    {/* Doctor Posts */}
-                    <Route
-                      path="/doctor/posts"
-                      element={
-                        <RoleGuard allowedRoles={['doctor', 'admin']}>
-                          <DoctorPostsPage />
-                        </RoleGuard>
-                      }
-                    />
+                      {/* Doctor Posts */}
+                      <Route
+                        path="/doctor/posts"
+                        element={
+                          <RoleGuard allowedRoles={['doctor', 'admin']}>
+                            <DoctorPostsPage />
+                          </RoleGuard>
+                        }
+                      />
 
-                    {/* Admin Moderation & Control Center */}
-                    <Route
-                      path="/admin/doctors/applications"
-                      element={
-                        <RoleGuard allowedRoles={['admin']}>
-                          <AdminControlCenter initialTab="applications" />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/admin/posts"
-                      element={
-                        <RoleGuard allowedRoles={['admin']}>
-                          <AdminControlCenter initialTab="posts" />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/admin/audit"
-                      element={
-                        <RoleGuard allowedRoles={['admin']}>
-                          <AdminControlCenter initialTab="audit" />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/admin/applications/:id"
-                      element={
-                        <RoleGuard allowedRoles={['admin']}>
-                          <AdminApplicationReviewPage />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/admin/posts/:id"
-                      element={
-                        <RoleGuard allowedRoles={['admin']}>
-                          <AdminPostReviewPage />
-                        </RoleGuard>
-                      }
-                    />
+                      {/* Admin Moderation & Control Center */}
+                      <Route
+                        path="/admin/doctors/applications"
+                        element={
+                          <RoleGuard allowedRoles={['admin']}>
+                            <AdminControlCenter initialTab="applications" />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/admin/posts"
+                        element={
+                          <RoleGuard allowedRoles={['admin']}>
+                            <AdminControlCenter initialTab="posts" />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/admin/audit"
+                        element={
+                          <RoleGuard allowedRoles={['admin']}>
+                            <AdminControlCenter initialTab="audit" />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/admin/applications/:id"
+                        element={
+                          <RoleGuard allowedRoles={['admin']}>
+                            <AdminApplicationReviewPage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/admin/posts/:id"
+                        element={
+                          <RoleGuard allowedRoles={['admin']}>
+                            <AdminPostReviewPage />
+                          </RoleGuard>
+                        }
+                      />
 
-                    {/* Post-Consultation Clinical Workspace & Follow-Up Routes */}
-                    <Route
-                      path="/doctor/consultations/:id"
-                      element={
-                        <RoleGuard allowedRoles={['doctor', 'admin']}>
-                          <DoctorConsultationWorkspacePage />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/doctor/consultations/:id/prescription"
-                      element={
-                        <RoleGuard allowedRoles={['doctor', 'admin']}>
-                          <DoctorConsultationWorkspacePage />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/doctor/follow-up"
-                      element={
-                        <RoleGuard allowedRoles={['doctor', 'admin']}>
-                          <DoctorFollowUpDashboardPage />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/doctor/follow-up/:id"
-                      element={
-                        <RoleGuard allowedRoles={['doctor', 'admin']}>
-                          <DoctorFollowUpDetailPage />
-                        </RoleGuard>
-                      }
-                    />
-                    {/* Patient Health Dashboard & Care System */}
-                    <Route
-                      path="/patient"
-                      element={
-                        <RoleGuard allowedRoles={['patient', 'admin']}>
-                          <PatientDashboardPage />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/patient/dashboard"
-                      element={
-                        <RoleGuard allowedRoles={['patient', 'admin']}>
-                          <PatientDashboardPage />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/patient/care-journey"
-                      element={
-                        <RoleGuard allowedRoles={['patient', 'admin']}>
-                          <PatientCareJourneyPage />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/patient/medications"
-                      element={
-                        <RoleGuard allowedRoles={['patient', 'admin']}>
-                          <PatientMedicationsPage />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/patient/medications/history"
-                      element={
-                        <RoleGuard allowedRoles={['patient', 'admin']}>
-                          <PatientMedicationsPage />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/patient/follow-up/:id/check-in"
-                      element={
-                        <RoleGuard allowedRoles={['patient', 'admin']}>
-                          <PatientConditionCheckInPage />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/patient/activity"
-                      element={
-                        <RoleGuard allowedRoles={['patient', 'admin']}>
-                          <PatientActivityPage />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/patient/health-summary"
-                      element={
-                        <RoleGuard allowedRoles={['patient', 'admin']}>
-                          <PatientHealthSummaryPage />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/patient/calendar"
-                      element={
-                        <RoleGuard allowedRoles={['patient', 'admin']}>
-                          <PatientCalendarPage />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/patient/documents"
-                      element={
-                        <RoleGuard allowedRoles={['patient', 'admin']}>
-                          <PatientDocumentsPage />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route
-                      path="/doctor/patients/:patientId"
-                      element={
-                        <RoleGuard allowedRoles={['doctor', 'admin']}>
-                          <DoctorPatientDetailPage />
-                        </RoleGuard>
-                      }
-                    />
-                    <Route path="/notifications" element={<NotificationCenterPage />} />
-                    <Route path="/settings/notifications" element={<NotificationPreferencesPage />} />
+                      {/* Post-Consultation Clinical Workspace & Follow-Up Routes */}
+                      <Route
+                        path="/doctor/consultations/:id"
+                        element={
+                          <RoleGuard allowedRoles={['doctor', 'admin']}>
+                            <DoctorConsultationWorkspacePage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/doctor/consultations/:id/prescription"
+                        element={
+                          <RoleGuard allowedRoles={['doctor', 'admin']}>
+                            <DoctorConsultationWorkspacePage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/doctor/follow-up"
+                        element={
+                          <RoleGuard allowedRoles={['doctor', 'admin']}>
+                            <DoctorFollowUpDashboardPage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/doctor/follow-up/:id"
+                        element={
+                          <RoleGuard allowedRoles={['doctor', 'admin']}>
+                            <DoctorFollowUpDetailPage />
+                          </RoleGuard>
+                        }
+                      />
+                      {/* Patient Health Dashboard & Care System */}
+                      <Route
+                        path="/patient"
+                        element={
+                          <RoleGuard allowedRoles={['patient', 'admin']}>
+                            <PatientDashboardPage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/patient/dashboard"
+                        element={
+                          <RoleGuard allowedRoles={['patient', 'admin']}>
+                            <PatientDashboardPage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/patient/care-journey"
+                        element={
+                          <RoleGuard allowedRoles={['patient', 'admin']}>
+                            <PatientCareJourneyPage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/patient/medications"
+                        element={
+                          <RoleGuard allowedRoles={['patient', 'admin']}>
+                            <PatientMedicationsPage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/patient/medications/history"
+                        element={
+                          <RoleGuard allowedRoles={['patient', 'admin']}>
+                            <PatientMedicationsPage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/patient/follow-up/:id/check-in"
+                        element={
+                          <RoleGuard allowedRoles={['patient', 'admin']}>
+                            <PatientConditionCheckInPage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/patient/activity"
+                        element={
+                          <RoleGuard allowedRoles={['patient', 'admin']}>
+                            <PatientActivityPage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/patient/health-summary"
+                        element={
+                          <RoleGuard allowedRoles={['patient', 'admin']}>
+                            <PatientHealthSummaryPage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/patient/calendar"
+                        element={
+                          <RoleGuard allowedRoles={['patient', 'admin']}>
+                            <PatientCalendarPage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/patient/documents"
+                        element={
+                          <RoleGuard allowedRoles={['patient', 'admin']}>
+                            <PatientDocumentsPage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/doctor/patients/:patientId"
+                        element={
+                          <RoleGuard allowedRoles={['doctor', 'admin']}>
+                            <DoctorPatientDetailPage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route path="/notifications" element={<NotificationCenterPage />} />
+                      <Route path="/settings/notifications" element={<NotificationPreferencesPage />} />
 
-                    {/* Public Doctor Directory & Health Posts */}
-                    <Route path="/doctors" element={<DoctorsDirectoryPage />} />
-                    <Route path="/posts" element={<PublicPostFeedPage />} />
+                      {/* Public Doctor Directory & Health Posts */}
+                      <Route path="/doctors" element={<DoctorsDirectoryPage />} />
+                      <Route path="/posts" element={<PublicPostFeedPage />} />
 
-                    {/* Legacy compatibility routes */}
-                    <Route path="/roles/doctor" element={<Navigate to="/doctor" replace />} />
-                    <Route path="/roles/patient" element={<Navigate to="/patient" replace />} />
-                    <Route path="/roles/admin" element={<Navigate to="/admin" replace />} />
-                    <Route path="/roles/lab" element={<Navigate to="/lab" replace />} />
-                    <Route path="/roles/nurse" element={<Navigate to="/nurse" replace />} />
-                    <Route path="/roles/pharmacist" element={<Navigate to="/pharmacy" replace />} />
+                      {/* Legacy compatibility routes */}
+                      <Route path="/roles/doctor" element={<Navigate to="/doctor" replace />} />
+                      <Route path="/roles/patient" element={<Navigate to="/patient" replace />} />
+                      <Route path="/roles/admin" element={<Navigate to="/admin" replace />} />
+                      <Route path="/roles/lab" element={<Navigate to="/lab" replace />} />
+                      <Route path="/roles/nurse" element={<Navigate to="/nurse" replace />} />
+                      <Route path="/roles/pharmacist" element={<Navigate to="/pharmacy" replace />} />
 
-                    {/* 1-Click demo mode */}
-                    <Route path="/demo" element={<DemoPage />} />
-                  </Route>
+                      {/* 1-Click demo mode */}
+                      <Route path="/demo" element={<DemoPage />} />
+                    </Route>
 
-                  {/* Root redirect */}
-                  <Route path="/" element={<RoleHomeRedirect />} />
+                    {/* Root redirect */}
+                    <Route path="/" element={<RoleHomeRedirect />} />
 
-                  {/* Access-pending / unauthorized (authenticated but unassigned role) */}
-                  <Route path="/unauthorized" element={<AccessDeniedPage />} />
+                    {/* Access-pending / unauthorized (authenticated but unassigned role) */}
+                    <Route path="/unauthorized" element={<AccessDeniedPage />} />
 
-                  {/* 404 */}
-                  <Route path="*" element={<NotFoundPage />} />
-                </Routes>
-              </Suspense>
-            </RoleProvider>
-          </AuthProvider>
-        </ToastProvider>
-      </ThemeProvider>
-    </BrowserRouter>
+                    {/* 404 */}
+                    <Route path="*" element={<NotFoundPage />} />
+                  </Routes>
+                </Suspense>
+              </RoleProvider>
+            </AuthProvider>
+          </ToastProvider>
+        </ThemeProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }

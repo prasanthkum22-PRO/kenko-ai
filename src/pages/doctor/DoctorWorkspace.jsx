@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getDoctorWorkspace, getConsultations, getLabTasks, getAppointments, createAppointmentMeet } from '../../services/api';
+import { getDoctorWorkspace, getConsultations, getLabTasks, createAppointmentMeet } from '../../services/api';
 import {
   listUserAppointmentsFirestore,
   listenToUserAppointmentsFirestore,
@@ -13,18 +13,84 @@ import { useToast } from '../../context/ToastContext';
 import {
   IconVideo,
   IconMic,
-  IconRx,
   IconRefresh,
   IconStethoscope,
   IconClock,
   IconFlask,
-  IconUsers,
   IconCheck,
   IconArrowRight,
   IconDoc,
   IconCalendar,
   IconPlus,
 } from '../../components/icons';
+
+// Safe date formatter that will never throw on invalid/object dates
+function formatScheduledDate(rawDate) {
+  if (!rawDate) return 'Scheduled';
+  try {
+    let dateObj = null;
+    if (rawDate && typeof rawDate.toDate === 'function') {
+      dateObj = rawDate.toDate();
+    } else if (rawDate && typeof rawDate.seconds === 'number') {
+      dateObj = new Date(rawDate.seconds * 1000);
+    } else if (typeof rawDate === 'string' || typeof rawDate === 'number') {
+      dateObj = new Date(rawDate);
+    }
+
+    if (dateObj && !isNaN(dateObj.getTime())) {
+      return dateObj.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+    }
+    return typeof rawDate === 'string' ? rawDate : 'Scheduled';
+  } catch {
+    return 'Scheduled';
+  }
+}
+
+// Normalize appointment items safely
+function normalizeAppointmentItem(a) {
+  if (!a || typeof a !== 'object') return null;
+
+  let scheduledAtIso = '';
+  if (a.scheduledStart?.toDate) {
+    try { scheduledAtIso = a.scheduledStart.toDate().toISOString(); } catch {}
+  } else if (typeof a.scheduledStart?.seconds === 'number') {
+    try { scheduledAtIso = new Date(a.scheduledStart.seconds * 1000).toISOString(); } catch {}
+  } else if (typeof a.scheduledStart === 'string') {
+    scheduledAtIso = a.scheduledStart;
+  } else if (typeof a.scheduled_at === 'string') {
+    scheduledAtIso = a.scheduled_at;
+  }
+
+  const rawType = a.consultationType || a.appointment_type || a.appointmentType || 'video';
+  const rawStatus = a.status || 'SCHEDULED';
+  const rawMeetStatus = a.meetStatus || a.meet_status || 'SCHEDULED';
+
+  return {
+    id: String(a.id || Math.random().toString(36).slice(2)),
+    patientId: String(a.patientId || a.patient_id || ''),
+    patientName: typeof a.patientName === 'string' ? a.patientName : (typeof a.patient_name === 'string' ? a.patient_name : 'Patient'),
+    patientAge: a.patientAge || a.patient_age || null,
+    patientGender: typeof a.patientGender === 'string' ? a.patientGender : (typeof a.patient_gender === 'string' ? a.patient_gender : ''),
+    doctorId: String(a.doctorId || a.doctor_id || ''),
+    doctorName: typeof a.doctorName === 'string' ? a.doctorName : (typeof a.doctor_name === 'string' ? a.doctor_name : 'Dr. Specialist'),
+    doctorSpecialization: typeof a.doctorSpecialization === 'string' ? a.doctorSpecialization : (typeof a.doctor_specialization === 'string' ? a.doctor_specialization : 'General Medicine'),
+    appointmentType: String(rawType).toLowerCase(),
+    scheduledAt: scheduledAtIso,
+    reason: typeof a.reason === 'string' ? a.reason : 'General Consultation',
+    status: String(rawStatus).toUpperCase(),
+    meetStatus: String(rawMeetStatus).toUpperCase(),
+    googleMeetingUri: typeof a.googleMeetingUri === 'string' ? a.googleMeetingUri : (typeof a.google_meeting_uri === 'string' ? a.google_meeting_uri : null),
+    googleMeetingCode: typeof a.googleMeetingCode === 'string' ? a.googleMeetingCode : (typeof a.google_meeting_code === 'string' ? a.google_meeting_code : null),
+    googleSpaceName: typeof a.googleSpaceName === 'string' ? a.googleSpaceName : (typeof a.google_space_name === 'string' ? a.google_space_name : null),
+    consultationId: a.consultationId || a.consultation_id || null,
+  };
+}
 
 export default function DoctorWorkspace() {
   const navigate = useNavigate();
@@ -35,7 +101,7 @@ export default function DoctorWorkspace() {
   const [consultations, setConsultations] = useState([]);
   const [labTasks, setLabTasks] = useState([]);
   const [appointments, setAppointments] = useState([]);
-  const [appointmentFilter, setAppointmentFilter] = useState('upcoming'); // 'upcoming' | 'all' | 'video' | 'in_person'
+  const [appointmentFilter, setAppointmentFilter] = useState('upcoming'); // 'requests' | 'confirmed' | 'upcoming' | 'video' | 'in_person' | 'all'
   const [loading, setLoading] = useState(true);
   const [isRealtimeActive, setIsRealtimeActive] = useState(false);
 
@@ -53,34 +119,29 @@ export default function DoctorWorkspace() {
         ]);
 
         if (!active) return;
-        setWorkspace(wsData);
-        setConsultations(cList || []);
-        setLabTasks(lList || []);
+        setWorkspace(wsData && typeof wsData === 'object' ? wsData : null);
+
+        const safeConsultations = Array.isArray(cList)
+          ? cList
+          : (Array.isArray(cList?.consultations) ? cList.consultations : []);
+        setConsultations(safeConsultations);
+
+        const safeLab = Array.isArray(lList)
+          ? lList
+          : (Array.isArray(lList?.tasks) ? lList.tasks : []);
+        setLabTasks(safeLab);
 
         // Load appointments directly from Firebase Firestore (Pure Firebase)
         try {
           const fsAppts = await listUserAppointmentsFirestore(user?.uid, 'doctor');
-          const normalizedFs = (fsAppts || []).map((a) => ({
-            id: a.id,
-            patientId: a.patientId || a.patient_id,
-            patientName: a.patientName || a.patient_name || 'Patient',
-            patientAge: a.patientAge || a.patient_age,
-            patientGender: a.patientGender || a.patient_gender,
-            doctorId: a.doctorId || a.doctor_id,
-            doctorName: a.doctorName || a.doctor_name || 'Dr. Specialist',
-            doctorSpecialization: a.doctorSpecialization || a.doctor_specialization || 'General Medicine',
-            appointmentType: (a.consultationType || a.appointment_type || a.appointmentType || 'video').toLowerCase(),
-            scheduledAt: a.scheduledStart?.toDate ? a.scheduledStart.toDate().toISOString() : (a.scheduledStart || a.scheduled_at),
-            reason: a.reason || 'General Consultation',
-            status: (a.status || 'SCHEDULED').toUpperCase(),
-            meetStatus: a.meetStatus || a.meet_status || 'SCHEDULED',
-            googleMeetingUri: a.googleMeetingUri || a.google_meeting_uri,
-            googleMeetingCode: a.googleMeetingCode || a.google_meeting_code,
-            googleSpaceName: a.googleSpaceName || a.google_space_name,
-            consultationId: a.consultationId || a.consultation_id,
-          })).sort((a, b) => new Date(b.scheduledAt || 0) - new Date(a.scheduledAt || 0));
+          if (active && Array.isArray(fsAppts)) {
+            const normalizedFs = fsAppts
+              .map(normalizeAppointmentItem)
+              .filter(Boolean)
+              .sort((a, b) => new Date(b.scheduledAt || 0) - new Date(a.scheduledAt || 0));
 
-          if (active) setAppointments(normalizedFs);
+            setAppointments(normalizedFs);
+          }
         } catch (fsErr) {
           console.warn('Firestore direct fetch error:', fsErr);
         }
@@ -99,25 +160,10 @@ export default function DoctorWorkspace() {
         if (!active) return;
         setIsRealtimeActive(true);
         if (Array.isArray(liveList)) {
-          const normalized = liveList.map((f) => ({
-            id: f.id,
-            patientId: f.patientId || f.patient_id,
-            patientName: f.patientName || f.patient_name || 'Patient',
-            patientAge: f.patientAge || f.patient_age,
-            patientGender: f.patientGender || f.patient_gender,
-            doctorId: f.doctorId || f.doctor_id,
-            doctorName: f.doctorName || f.doctor_name || 'Dr. Specialist',
-            doctorSpecialization: f.doctorSpecialization || f.doctor_specialization || 'General Medicine',
-            appointmentType: (f.consultationType || f.appointment_type || f.appointmentType || 'video').toLowerCase(),
-            scheduledAt: f.scheduledStart?.toDate ? f.scheduledStart.toDate().toISOString() : (f.scheduledStart || f.scheduled_at),
-            reason: f.reason || 'General Consultation',
-            status: (f.status || 'SCHEDULED').toUpperCase(),
-            meetStatus: f.meetStatus || f.meet_status || 'SCHEDULED',
-            googleMeetingUri: f.googleMeetingUri || f.google_meeting_uri,
-            googleMeetingCode: f.googleMeetingCode || f.google_meeting_code,
-            googleSpaceName: f.googleSpaceName || f.google_space_name,
-            consultationId: f.consultationId || f.consultation_id,
-          })).sort((a, b) => new Date(b.scheduledAt || 0) - new Date(a.scheduledAt || 0));
+          const normalized = liveList
+            .map(normalizeAppointmentItem)
+            .filter(Boolean)
+            .sort((a, b) => new Date(b.scheduledAt || 0) - new Date(a.scheduledAt || 0));
 
           setAppointments(normalized);
         }
@@ -136,7 +182,7 @@ export default function DoctorWorkspace() {
     try {
       await updateAppointmentFirestore(appointmentId, { status: newStatus });
       setAppointments((prev) =>
-        prev.map((a) => (a.id === appointmentId ? { ...a, status: newStatus } : a))
+        (Array.isArray(prev) ? prev : []).map((a) => (a.id === appointmentId ? { ...a, status: newStatus } : a))
       );
       success(`Appointment marked as ${newStatus}`, 'Status Updated');
     } catch (err) {
@@ -150,8 +196,13 @@ export default function DoctorWorkspace() {
       let meetInfo = null;
       try {
         const meetRes = await createAppointmentMeet(apt.id);
-        if (meetRes?.meetingUri) {
-          meetInfo = meetRes;
+        if (meetRes) {
+          const uri = meetRes.meetingUri || meetRes.meeting_uri || meetRes.meeting?.meetingUri || meetRes.meeting?.meeting_uri;
+          const code = meetRes.meetingCode || meetRes.meeting_code || meetRes.meeting?.meetingCode || meetRes.meeting?.meeting_code;
+          const space = meetRes.spaceName || meetRes.space_name || meetRes.meeting?.spaceName || meetRes.meeting?.space_name;
+          if (uri) {
+            meetInfo = { meetingUri: uri, meetingCode: code, spaceName: space };
+          }
         }
       } catch (backendErr) {
         console.debug('Backend Meet space creation note:', backendErr);
@@ -166,7 +217,7 @@ export default function DoctorWorkspace() {
       );
 
       setAppointments((prev) =>
-        prev.map((a) =>
+        (Array.isArray(prev) ? prev : []).map((a) =>
           a.id === apt.id
             ? {
                 ...a,
@@ -193,7 +244,7 @@ export default function DoctorWorkspace() {
     try {
       await declineAppointmentFirestore(apt.id, 'Declined by doctor');
       setAppointments((prev) =>
-        prev.map((a) =>
+        (Array.isArray(prev) ? prev : []).map((a) =>
           a.id === apt.id ? { ...a, status: 'DECLINED', meetStatus: 'CANCELLED' } : a
         )
       );
@@ -203,15 +254,19 @@ export default function DoctorWorkspace() {
     }
   };
 
-  const metrics = workspace?.metrics || {};
-  const pendingVerification = consultations.filter((c) => !c.is_approved).length;
-  const pendingLab = labTasks.filter((l) => l.status !== 'Reviewed' && l.status !== 'Completed').length;
-  const pendingRequestsCount = appointments.filter(
+  const safeConsultations = Array.isArray(consultations) ? consultations : [];
+  const safeLabTasks = Array.isArray(labTasks) ? labTasks : [];
+  const safeAppointments = Array.isArray(appointments) ? appointments : [];
+
+  const metrics = (workspace && typeof workspace === 'object' && workspace.metrics) || {};
+  const pendingVerification = safeConsultations.filter((c) => !c.is_approved).length;
+  const pendingLab = safeLabTasks.filter((l) => l.status !== 'Reviewed' && l.status !== 'Completed').length;
+  const pendingRequestsCount = safeAppointments.filter(
     (a) => a.status === 'SCHEDULED' || a.status === 'REQUESTED' || a.status === 'PENDING'
   ).length;
-  const confirmedCount = appointments.filter((a) => a.status === 'CONFIRMED').length;
+  const confirmedCount = safeAppointments.filter((a) => a.status === 'CONFIRMED').length;
 
-  const filteredAppointments = appointments.filter((apt) => {
+  const filteredAppointments = safeAppointments.filter((apt) => {
     const st = apt.status?.toUpperCase() || 'SCHEDULED';
     if (appointmentFilter === 'requests') return st === 'SCHEDULED' || st === 'REQUESTED' || st === 'PENDING';
     if (appointmentFilter === 'confirmed') return st === 'CONFIRMED';
@@ -223,7 +278,7 @@ export default function DoctorWorkspace() {
 
   if (loading) {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-6" id="doctor-workspace-loading">
         <div className="skeleton skeleton-text" style={{ width: 300, height: 30 }} />
         <div className="kpi-grid">
           {[0, 1, 2, 3].map((i) => (
@@ -302,7 +357,7 @@ export default function DoctorWorkspace() {
             <IconStethoscope />
           </div>
           <span className="kpi-label">Total Consultations</span>
-          <span className="kpi-value">{metrics.total_consultations || consultations.length || 0}</span>
+          <span className="kpi-value">{metrics.total_consultations || safeConsultations.length || 0}</span>
           <span className="kpi-foot">In-person &amp; video visits</span>
         </div>
         <div className="kpi-card">
@@ -417,22 +472,7 @@ export default function DoctorWorkspace() {
                     const isConfirmed = apt.status === 'CONFIRMED';
                     const isCompleted = apt.status === 'COMPLETED';
                     const isDeclined = apt.status === 'DECLINED' || apt.status === 'CANCELLED';
-
-                    let formattedDate = 'Scheduled';
-                    if (apt.scheduledAt) {
-                      try {
-                        const d = new Date(apt.scheduledAt);
-                        formattedDate = d.toLocaleString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          hour: 'numeric',
-                          minute: '2-digit',
-                          hour12: true,
-                        });
-                      } catch {
-                        formattedDate = String(apt.scheduledAt);
-                      }
-                    }
+                    const formattedDate = formatScheduledDate(apt.scheduledAt);
 
                     return (
                       <tr key={apt.id}>
@@ -575,7 +615,7 @@ export default function DoctorWorkspace() {
             </button>
           </div>
           <div className="flex flex-col gap-3" style={{ padding: 18, flex: 1 }}>
-            {consultations.length === 0 ? (
+            {safeConsultations.length === 0 ? (
               <div className="empty-state" style={{ flex: 1 }}>
                 <div className="empty-icon">
                   <IconDoc />
@@ -597,11 +637,13 @@ export default function DoctorWorkspace() {
                     </tr>
                   </thead>
                   <tbody>
-                    {consultations.map((c) => (
+                    {safeConsultations.map((c) => (
                       <tr key={c.id}>
                         <td>
-                          <span className="font-semibold">{c.patient_name}</span>
-                          <span className="text-muted" style={{ fontSize: 12 }}> ({c.patient_age}y)</span>
+                          <span className="font-semibold">{c.patient_name || 'Patient'}</span>
+                          {c.patient_age && (
+                            <span className="text-muted" style={{ fontSize: 12 }}> ({c.patient_age}y)</span>
+                          )}
                         </td>
                         <td>
                           <span className={`badge ${c.consultation_type === 'video' ? 'badge-info' : 'badge-secondary'}`}>
@@ -644,7 +686,7 @@ export default function DoctorWorkspace() {
             </button>
           </div>
           <div className="flex flex-col gap-3" style={{ padding: 18, flex: 1 }}>
-            {labTasks.length === 0 ? (
+            {safeLabTasks.length === 0 ? (
               <div className="empty-state" style={{ flex: 1 }}>
                 <div className="empty-icon">
                   <IconFlask />
@@ -653,16 +695,16 @@ export default function DoctorWorkspace() {
                 <p className="empty-description">New lab investigations will appear here as they are ordered.</p>
               </div>
             ) : (
-              labTasks.slice(0, 6).map((task) => (
-                <div key={task.id} className="glass-card-flat flex items-center justify-between" style={{ padding: '10px 14px' }}>
+              safeLabTasks.slice(0, 6).map((task) => (
+                <div key={task.id || Math.random()} className="glass-card-flat flex items-center justify-between" style={{ padding: '10px 14px' }}>
                   <div className="min-w-0">
-                    <p className="font-semibold">{task.test_name}</p>
+                    <p className="font-semibold">{task.test_name || 'Diagnostic Panel'}</p>
                     <p className="text-muted text-xs" style={{ marginTop: 2 }}>
-                      Patient: {task.patient_name}
+                      Patient: {task.patient_name || 'Patient'}
                     </p>
                   </div>
                   <span className={`status-badge status-${String(task.status || '').toLowerCase().replace(/ /g, '_')}`}>
-                    {task.status}
+                    {task.status || 'Pending'}
                   </span>
                 </div>
               ))
