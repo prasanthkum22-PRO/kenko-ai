@@ -319,41 +319,20 @@ export default function GoogleMeetCard({
     const consultId = consultation?.id || consultation?.consultation_id || appointment?.consultation_id || null;
     const apptId = appointment?.id || consultation?.appointment_id || null;
 
-    const clientId = '48743221773-adh94vkboqogbj0mhvkja68o17ij9g5s.apps.googleusercontent.com';
-    const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-    const redirectUri = isLocal
-      ? 'http://localhost:8000/api/google/callback'
-      : `${window.location.origin}/api/google/callback`;
-    const scopes = [
-      'https://www.googleapis.com/auth/meetings.space.created',
-      'https://www.googleapis.com/auth/meetings.space.readonly',
-      'openid',
-      'https://www.googleapis.com/auth/userinfo.email',
-      'https://www.googleapis.com/auth/userinfo.profile',
-    ].join(' ');
-    const currentUid = user?.id || user?.uid || 'default_doctor';
-    const statePayload = encodeURIComponent(
-      JSON.stringify({
-        uid: currentUid,
-        return_url: currentUrl,
-        consultation_id: consultId,
-        appointment_id: apptId,
-      })
-    );
-    const directGoogleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes)}&access_type=offline&prompt=consent%20select_account&include_granted_scopes=true&state=${statePayload}`;
-
     try {
       setLoading(true);
-      const res = await getGoogleAuthUrl(currentUrl, consultId, apptId).catch(() => null);
+      const res = await getGoogleAuthUrl(currentUrl, consultId, apptId);
       if (res?.auth_url) {
         window.location.href = res.auth_url;
         return;
       }
-      // Direct OAuth redirect
-      window.location.href = directGoogleAuthUrl;
+      if (res?.error) {
+        toastError(res.message || 'Google OAuth is not configured on the backend.', 'Configuration Required');
+      }
     } catch (err) {
       console.error('Google OAuth URL redirect note:', err);
-      window.location.href = directGoogleAuthUrl;
+      const errMsg = err?.response?.data?.message || err?.message || 'Could not initiate Google authorization.';
+      toastError(errMsg, 'OAuth Error');
     } finally {
       setLoading(false);
     }
@@ -405,82 +384,27 @@ export default function GoogleMeetCard({
   const handleCreateMeet = async () => {
     if (!consentConfirmed) { setConsentModalOpen(true); return; }
     setMeetCreationError(null);
+    const consultId = consultation?.id || consultation?.consultation_id || appointment?.consultation_id || appointment?.id;
+    if (!consultId) {
+      toastError('No consultation identifier found.', 'Error');
+      return;
+    }
+
     try {
       setLoading(true);
-      let meetUri = null;
-      let meetCode = null;
-      let spaceName = null;
-
-      // 1. First try consultation route
-      if (consultation?.id || consultation?.consultation_id) {
-        const cId = consultation.id || consultation.consultation_id;
-        try {
-          const res = await createConsultationGoogleMeet(cId);
-          if (res?.meetingUrl || res?.meetingUri || res?.meeting?.meetingUrl) {
-            meetUri = res.meetingUrl || res.meetingUri || res.meeting?.meetingUrl;
-            meetCode = res.meetingCode || res.meeting?.meetingCode || null;
-            spaceName = res.spaceName || res.meeting?.spaceName || null;
-          }
-        } catch (err) {
-          const detailMsg = err?.response?.data?.message || err?.response?.data?.detail?.message || err?.response?.data?.detail;
-          if (detailMsg && typeof detailMsg === 'string') {
-            setMeetCreationError(detailMsg);
-          }
-          console.debug('createConsultationGoogleMeet note:', err);
-        }
-      }
-
-      // 2. Try appointment route if still needed
-      if (!meetUri && (appointment?.id || consultation?.appointment_id)) {
-        try {
-          const res = await createAppointmentMeet(appointment?.id || consultation?.appointment_id);
-          if (res?.meetingUri || res?.meeting?.meetingUri) {
-            meetUri = res.meetingUri || res.meeting?.meetingUri;
-            meetCode = res.meetingCode || res.meeting?.meetingCode || null;
-            spaceName = res.spaceName || res.meeting?.spaceName || null;
-          }
-        } catch (err) {
-          const detailMsg = err?.response?.data?.message || err?.response?.data?.detail?.message || err?.response?.data?.detail;
-          if (detailMsg && typeof detailMsg === 'string') {
-            setMeetCreationError(detailMsg);
-          }
-          console.debug('createAppointmentMeet note:', err);
-        }
-      }
-
-      // 3. Fallback to consultation route if needed
-      if (!meetUri && consultation?.id) {
-        try {
-          const res = await createGoogleMeet(consultation.id, consultation.patient_id || appointment?.patient_id);
-          if (res?.meetingUri) {
-            meetUri = res.meetingUri;
-            meetCode = res.meetingCode || null;
-            spaceName = res.spaceName || null;
-          }
-        } catch (err) {
-          const detailMsg = err?.response?.data?.message || err?.response?.data?.detail?.message || err?.response?.data?.detail;
-          if (detailMsg && typeof detailMsg === 'string') {
-            setMeetCreationError(detailMsg);
-          }
-          console.debug('createGoogleMeet note:', err);
-        }
-      }
+      const res = await createGoogleMeet(consultId, consultation?.patient_id || appointment?.patient_id);
+      const meetUri = res?.meetingUri || res?.meetingUrl;
+      const meetCode = res?.meetingCode || (meetUri ? meetUri.split('/').pop() : null);
+      const spaceName = res?.spaceName || null;
 
       if (!meetUri) {
-        if (!authStatus.is_connected) {
-          info('Directing to Google authorization to create consultation space...', 'OAuth Required');
-          await handleConnectGoogle();
-          return;
-        }
-        setMeetCreationError((prev) => prev || 'Unable to prepare Google Meet space. Please connect your Google account.');
-        setMeetData((prev) => ({ ...prev, meetingStatus: 'meet_creation_failed' }));
-        toastError('Failed to create Google Meet space. Please connect your Google account or retry.', 'Creation Error');
-        return;
+        throw new Error(res?.message || 'Google Meet URL was not returned by server.');
       }
 
       // Update Firestore with real meeting metadata
-      if (appointment?.id) {
-        await acceptAppointmentFirestore(appointment.id, meetUri, meetCode, spaceName).catch(() => null);
+      const apptId = appointment?.id || consultation?.appointment_id || consultId;
+      if (apptId) {
+        await acceptAppointmentFirestore(apptId, meetUri, meetCode, spaceName).catch(() => null);
       }
 
       setMeetData((prev) => ({
@@ -494,9 +418,21 @@ export default function GoogleMeetCard({
       if (onStatusChange) onStatusChange('meet_ready');
       if (onConsultationUpdated) onConsultationUpdated();
     } catch (err) {
-      setMeetCreationError(err?.message || 'Failed to create Google Meet space.');
-      setMeetData((prev) => ({ ...prev, meetingStatus: 'meet_creation_failed' }));
-      toastError('Failed to create Google Meet.', 'Creation Error');
+      const errData = err?.response?.data;
+      const errObj = errData?.error;
+      const errCode = (typeof errObj === 'object' ? errObj?.code : errObj) || errData?.detail?.error || '';
+      const errMsg = (typeof errObj === 'object' ? errObj?.message : errData?.message) || errData?.detail?.message || errData?.detail || err?.message || 'Failed to create Google Meet space.';
+
+      if (errCode === 'GOOGLE_AUTH_REQUIRED' || errCode === 'GOOGLE_TOKEN_EXPIRED' || err?.response?.status === 401) {
+        info('Doctor Google authorization is required before starting telehealth.', 'Google Account Required');
+        setAuthStatus((prev) => ({ ...prev, is_connected: false }));
+        setMeetCreationError('Google connection required to generate video rooms.');
+      } else {
+        const displayErr = errCode ? `Error: ${errCode} — ${errMsg}` : errMsg;
+        setMeetCreationError(displayErr);
+        setMeetData((prev) => ({ ...prev, meetingStatus: 'meet_creation_failed' }));
+        toastError(displayErr, 'Creation Error');
+      }
     } finally {
       setLoading(false);
     }
@@ -758,32 +694,65 @@ export default function GoogleMeetCard({
           {/* STATE 1: NOT CREATED */}
           {isNotCreated && (
             <div className="flex flex-col items-center gap-4 py-4 w-full max-w-md">
-              <div className="flex items-center gap-2 text-sm text-secondary font-medium">
-                <span className="status-dot" style={{ background: '#94a3b8' }} />
-                <span>Meeting hasn't been created yet.</span>
-              </div>
-              <p className="text-xs text-muted">
-                The secure video consultation room will be prepared once initiated.
-              </p>
-
               {isDoctor ? (
-                <button
-                  id="create-google-meet-btn"
-                  type="button"
-                  className="btn btn-primary w-full flex items-center justify-center gap-2"
-                  style={{ minHeight: '48px', fontSize: '0.95rem', fontWeight: 600 }}
-                  onClick={handleCreateMeet}
-                  disabled={loading}
-                >
-                  <IconVideo size={18} />
-                  <span>Create Meeting</span>
-                </button>
+                !authStatus.is_connected ? (
+                  /* CASE 1: Google not connected */
+                  <div className="flex flex-col items-center gap-3 w-full animate-fade-in">
+                    <div className="flex items-center gap-2 text-sm text-amber-500 font-semibold">
+                      <span className="status-dot" style={{ background: '#f59e0b' }} />
+                      <span>Google account required</span>
+                    </div>
+                    <p className="text-xs text-muted max-w-xs">
+                      Connect your Google account to create and manage official Google Meet telehealth spaces.
+                    </p>
+                    <button
+                      id="connect-google-meet-btn"
+                      type="button"
+                      className="btn btn-primary w-full flex items-center justify-center gap-2 mt-1"
+                      style={{ minHeight: '48px', fontSize: '0.95rem', fontWeight: 600 }}
+                      onClick={handleConnectGoogle}
+                      disabled={loading}
+                    >
+                      <IconGoogle size={18} />
+                      <span>Connect Google</span>
+                    </button>
+                  </div>
+                ) : (
+                  /* CASE 2: Google connected */
+                  <div className="flex flex-col items-center gap-3 w-full animate-fade-in">
+                    <div className="flex items-center gap-2 text-sm text-emerald-500 font-semibold">
+                      <span className="status-dot" style={{ background: '#10b981' }} />
+                      <span>Google connected ({authStatus.email || 'Ready'})</span>
+                    </div>
+                    <p className="text-xs text-muted max-w-xs">
+                      Ready to launch a secure Google Meet video room for this consultation.
+                    </p>
+                    <button
+                      id="start-telehealth-btn"
+                      type="button"
+                      className="btn btn-primary w-full flex items-center justify-center gap-2 mt-1 shadow-md"
+                      style={{ minHeight: '48px', fontSize: '0.95rem', fontWeight: 600 }}
+                      onClick={handleCreateMeet}
+                      disabled={loading}
+                    >
+                      <IconVideo size={18} />
+                      <span>Start Telehealth Session</span>
+                    </button>
+                  </div>
+                )
               ) : (
-                <div
-                  className="w-full p-3 rounded-lg text-xs text-muted border border-subtle"
-                  style={{ background: 'var(--color-bg-base)' }}
-                >
-                  Your doctor will initialize the consultation room shortly before the scheduled time.
+                /* Patient view */
+                <div className="flex flex-col items-center gap-2 w-full">
+                  <div className="flex items-center gap-2 text-sm text-secondary font-medium">
+                    <span className="status-dot" style={{ background: '#94a3b8' }} />
+                    <span>Waiting for doctor to initialize meeting...</span>
+                  </div>
+                  <div
+                    className="w-full p-3 rounded-lg text-xs text-muted border border-subtle mt-1"
+                    style={{ background: 'var(--color-bg-base)' }}
+                  >
+                    Your doctor will initialize the consultation room shortly before the scheduled time. This page will update automatically.
+                  </div>
                 </div>
               )}
             </div>
@@ -794,10 +763,10 @@ export default function GoogleMeetCard({
             <div className="flex flex-col items-center gap-3 py-4 w-full max-w-md">
               <div className="flex items-center gap-2 text-danger font-semibold text-sm">
                 <IconAlert size={18} />
-                <span>Unable to prepare Google Meet space.</span>
+                <span>Unable to create Google Meet</span>
               </div>
               <p className="text-xs text-muted">
-                {meetCreationError || 'We could not connect to Google Meet. Please connect your Google account or try again.'}
+                {meetCreationError || 'We could not connect to Google Meet. Please reconnect your Google account or try again.'}
               </p>
               <div className="flex items-center gap-2 flex-wrap justify-center mt-2">
                 <button
@@ -808,7 +777,7 @@ export default function GoogleMeetCard({
                   disabled={loading}
                 >
                   <IconGoogle size={16} />
-                  <span>Connect Google Account</span>
+                  <span>Reconnect Google</span>
                 </button>
                 <button
                   id="retry-google-meet-btn"
@@ -819,7 +788,7 @@ export default function GoogleMeetCard({
                   disabled={loading}
                 >
                   <IconRefresh size={14} />
-                  <span>Retry Creation</span>
+                  <span>Try Again</span>
                 </button>
               </div>
             </div>

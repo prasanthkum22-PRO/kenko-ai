@@ -2,13 +2,15 @@
 MediBridge AI — Google Meet Transcript Service
 Interacts with Google Meet REST API v2 to:
 1. List transcript resources (conferenceRecords.transcripts)
-2. Retrieve transcript entries (conferenceRecords.transcripts.entries) with full pagination (nextPageToken)
+2. Retrieve transcript entries (conferenceRecords.transcripts.entries) with full pagination
 3. Map entries using participantService to DOCTOR / PATIENT / UNKNOWN
 4. Normalize and persist segments to local clinical database
+
+Never generates fake or fabricated transcript text in production.
 """
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
 import httpx
@@ -39,27 +41,23 @@ class TranscriptService:
         Calls: GET https://meet.googleapis.com/v2/{parent=conferenceRecords/*}/transcripts
         """
         access_token = await google_oauth_service.get_valid_access_token(user_id, db)
-        if not access_token or access_token.startswith("mock_"):
-            return [
-                {
-                    "name": f"{conference_record_name}/transcripts/transcript_001",
-                    "state": "ENDED",
-                    "startTime": (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat(),
-                    "endTime": datetime.now(timezone.utc).isoformat(),
-                    "isMock": True,
-                }
-            ]
+        if not access_token:
+            return []
 
         headers = {"Authorization": f"Bearer {access_token}"}
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            resp = await client.get(
-                f"{self.api_base}/{conference_record_name}/transcripts",
-                headers=headers,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                return data.get("transcripts", [])
-            logger.warning(f"Error listing transcripts for {conference_record_name}: {resp.status_code}")
+        try:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                resp = await client.get(
+                    f"{self.api_base}/{conference_record_name}/transcripts",
+                    headers=headers,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return data.get("transcripts", [])
+                logger.warning(f"[TranscriptService] List transcripts for {conference_record_name} returned HTTP {resp.status_code}")
+                return []
+        except Exception as e:
+            logger.error(f"[TranscriptService] list_transcripts error: {e}")
             return []
 
     async def fetch_all_transcript_entries(
@@ -73,38 +71,39 @@ class TranscriptService:
         GET https://meet.googleapis.com/v2/{parent=conferenceRecords/*/transcripts/*}/entries
         """
         access_token = await google_oauth_service.get_valid_access_token(user_id, db)
-        
-        # If in mock mode, generate realistic consultation dialogue
-        if not access_token or access_token.startswith("mock_"):
-            return self._generate_mock_transcript_entries(transcript_name)
+        if not access_token:
+            return []
 
         headers = {"Authorization": f"Bearer {access_token}"}
         all_entries = []
         page_token = None
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            while True:
-                params = {"pageSize": 100}
-                if page_token:
-                    params["pageToken"] = page_token
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                while True:
+                    params = {"pageSize": 100}
+                    if page_token:
+                        params["pageToken"] = page_token
 
-                resp = await client.get(
-                    f"{self.api_base}/{transcript_name}/entries",
-                    headers=headers,
-                    params=params,
-                )
+                    resp = await client.get(
+                        f"{self.api_base}/{transcript_name}/entries",
+                        headers=headers,
+                        params=params,
+                    )
 
-                if resp.status_code != 200:
-                    logger.error(f"Error fetching transcript entries: {resp.status_code} - {resp.text}")
-                    break
+                    if resp.status_code != 200:
+                        logger.error(f"[TranscriptService] Error fetching transcript entries: HTTP {resp.status_code}")
+                        break
 
-                data = resp.json()
-                entries = data.get("transcriptEntries", [])
-                all_entries.extend(entries)
+                    data = resp.json()
+                    entries = data.get("transcriptEntries", [])
+                    all_entries.extend(entries)
 
-                page_token = data.get("nextPageToken")
-                if not page_token:
-                    break
+                    page_token = data.get("nextPageToken")
+                    if not page_token:
+                        break
+        except Exception as e:
+            logger.error(f"[TranscriptService] fetch_all_transcript_entries error: {e}")
 
         return all_entries
 
@@ -139,14 +138,13 @@ class TranscriptService:
         )
 
         if not conference_records:
-            consultation.transcript_status = "processing"
-            consultation.meeting_status = "processing_transcript"
+            consultation.transcript_status = "not_available"
             db.commit()
             return {
                 "consultationId": consultation_id,
                 "entries": [],
-                "transcriptStatus": "processing",
-                "message": "Conference record is still being indexed by Google Meet. Please check again shortly.",
+                "transcriptStatus": "not_available",
+                "message": "TRANSCRIPT_NOT_AVAILABLE: Conference record not yet generated or indexed by Google Meet.",
             }
 
         active_conf = conference_records[0]
@@ -175,13 +173,13 @@ class TranscriptService:
         )
 
         if not transcripts:
-            consultation.transcript_status = "processing"
+            consultation.transcript_status = "not_available"
             db.commit()
             return {
                 "consultationId": consultation_id,
                 "entries": [],
-                "transcriptStatus": "processing",
-                "message": "Transcript is still being generated by Google Meet. Please check again shortly.",
+                "transcriptStatus": "not_available",
+                "message": "TRANSCRIPT_NOT_AVAILABLE: Transcript recording was not active or is not yet available for this conference.",
             }
 
         latest_transcript = transcripts[0]
@@ -196,13 +194,13 @@ class TranscriptService:
         )
 
         if not raw_entries:
-            consultation.transcript_status = "processing"
+            consultation.transcript_status = "not_available"
             db.commit()
             return {
                 "consultationId": consultation_id,
                 "entries": [],
-                "transcriptStatus": "processing",
-                "message": "Transcript entries are currently being processed by Google Meet.",
+                "transcriptStatus": "not_available",
+                "message": "TRANSCRIPT_NOT_AVAILABLE: No transcript entries found in Google Meet recording.",
             }
 
         # 5. Normalize Entries & Store in DB
@@ -215,7 +213,6 @@ class TranscriptService:
             p_info = participant_dir.get(p_resource, {})
             speaker_role = p_info.get("role", "UNKNOWN")
             
-            # Map role to DB speaker name ('Doctor', 'Patient', 'Other')
             speaker_label = "Doctor" if speaker_role == "DOCTOR" else ("Patient" if speaker_role == "PATIENT" else "Unknown")
             text = entry.get("text", "").strip()
             
@@ -225,7 +222,6 @@ class TranscriptService:
             start_time_str = entry.get("startTime", "")
             end_time_str = entry.get("endTime", "")
 
-            # Create DB TranscriptSegment
             seg = TranscriptSegment(
                 consultation_id=consultation_id,
                 speaker=speaker_label,
@@ -249,7 +245,6 @@ class TranscriptService:
                 "endTime": end_time_str or f"{int((current_seconds + 4) // 60):02d}:{int((current_seconds + 4) % 60):02d}",
             })
 
-            # Sync individual entry to Firestore subcollection: consultations/{id}/transcriptEntries/{entryId}
             try:
                 await firebase_service.sync_transcript_entry(
                     consultation_id=consultation_id,
@@ -269,7 +264,6 @@ class TranscriptService:
         consultation.duration_seconds = int(current_seconds)
         db.commit()
 
-        # Audit log entry for transcript access/sync
         audit = AuditLog(
             user_id=user_id,
             user_role="doctor",
@@ -294,64 +288,6 @@ class TranscriptService:
             "patientName": consultation.patient_name,
             "isReviewed": False,
         }
-
-    def _generate_mock_transcript_entries(self, transcript_name: str) -> List[Dict[str, Any]]:
-        """Generates realistic structured consultation dialogue for local testing."""
-        conf_id = transcript_name.split("/")[1] if "/" in transcript_name else "mock"
-        p_doctor = f"conferenceRecords/{conf_id}/participants/p_doctor"
-        p_patient = f"conferenceRecords/{conf_id}/participants/p_patient"
-
-        return [
-            {
-                "name": f"{transcript_name}/entries/1",
-                "participant": p_doctor,
-                "text": "Hello, how are you feeling today? What brings you in?",
-                "startTime": "09:30 AM",
-                "endTime": "09:30 AM",
-            },
-            {
-                "name": f"{transcript_name}/entries/2",
-                "participant": p_patient,
-                "text": "Hello Doctor. I have been experiencing persistent knee pain and swelling around the right joint for around three days.",
-                "startTime": "09:31 AM",
-                "endTime": "09:31 AM",
-            },
-            {
-                "name": f"{transcript_name}/entries/3",
-                "participant": p_doctor,
-                "text": "I see. Does the pain worsen when you bear weight or climb stairs? Any history of trauma or twisting injury?",
-                "startTime": "09:31 AM",
-                "endTime": "09:32 AM",
-            },
-            {
-                "name": f"{transcript_name}/entries/4",
-                "participant": p_patient,
-                "text": "Yes, especially when walking upstairs. No direct injury, but I went on a long hike over the weekend.",
-                "startTime": "09:32 AM",
-                "endTime": "09:32 AM",
-            },
-            {
-                "name": f"{transcript_name}/entries/5",
-                "participant": p_doctor,
-                "text": "Understood. I will prescribe Tablet Aceclofenac 100mg plus Paracetamol twice daily for 5 days after food, and apply an ice pack for 15 minutes twice a day. Let's also order a Right Knee X-Ray (AP and Lateral view).",
-                "startTime": "09:33 AM",
-                "endTime": "09:33 AM",
-            },
-            {
-                "name": f"{transcript_name}/entries/6",
-                "participant": p_patient,
-                "text": "Okay Doctor, will do. Should I come back for a review after the X-Ray?",
-                "startTime": "09:34 AM",
-                "endTime": "09:34 AM",
-            },
-            {
-                "name": f"{transcript_name}/entries/7",
-                "participant": p_doctor,
-                "text": "Yes, please schedule a follow-up review in 7 days with the X-Ray report. Rest your leg as much as possible.",
-                "startTime": "09:34 AM",
-                "endTime": "09:35 AM",
-            },
-        ]
 
 
 transcript_service = TranscriptService()

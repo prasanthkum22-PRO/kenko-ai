@@ -1,14 +1,14 @@
 """
 MediBridge AI — Google Meet REST API v2 Service
-Official Google Meet REST API v2 integration for creating spaces,
-retrieving conference records, tracking participants, and polling transcript artifacts.
+Production integration for creating Google Meet spaces, retrieving conference records,
+tracking participants, and synchronizing transcript artifacts.
+No mock/dummy fallback URLs are generated; all operations strictly hit Google APIs.
 """
 
 import os
+import uuid
 import logging
-import secrets
-import string
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
 import httpx
@@ -21,13 +21,6 @@ logger = logging.getLogger(__name__)
 MEET_API_BASE = "https://meet.googleapis.com/v2"
 
 
-def generate_meet_code() -> str:
-    """Generates a realistic 3-4-3 Google Meet code format: xxx-yyyy-zzz."""
-    def rand_letters(n):
-        return "".join(secrets.choice(string.ascii_lowercase) for _ in range(n))
-    return f"{rand_letters(3)}-{rand_letters(4)}-{rand_letters(3)}"
-
-
 class GoogleMeetService:
     def __init__(self):
         self.api_base = MEET_API_BASE
@@ -37,37 +30,38 @@ class GoogleMeetService:
         user_id: str,
         db: Session,
         access_type: str = "OPEN",
+        request_id: Optional[str] = None,
+        consultation_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Calls Google Meet REST API v2: POST https://meet.googleapis.com/v2/spaces
         Creates a durable Google Meet space for the consultation.
 
-        Returns dict with keys: name, meetingUri, meetingCode, config, isMock
-
-        If no valid access token is available (sandbox/demo mode), isMock=True
-        and a sandbox-format URI is returned so the app can transparently handle it.
-
-        If the Google API call fails with a real token, raises an exception —
-        we NEVER silently substitute a fake URI when real OAuth is configured.
+        Returns dict with keys: name, meetingUri, meetingCode, config.
+        Raises structured exceptions on any failure.
         """
+        req_id = request_id or f"req_{uuid.uuid4().hex[:10]}"
+
+        # 1. Check configuration
+        if not google_oauth_service.is_configured:
+            logger.error(
+                f"[GoogleMeet] requestId={req_id} operation=spaces.create user_id={user_id} "
+                f"consultationId={consultation_id} error=GOOGLE_OAUTH_NOT_CONFIGURED "
+                f"message='Google OAuth credentials missing on backend'"
+            )
+            raise RuntimeError("GOOGLE_OAUTH_NOT_CONFIGURED: Google OAuth client ID/secret are not configured.")
+
+        # 2. Get valid real access token
         access_token = await google_oauth_service.get_valid_access_token(user_id, db)
+        if not access_token:
+            logger.error(
+                f"[GoogleMeet] requestId={req_id} operation=spaces.create user_id={user_id} "
+                f"consultationId={consultation_id} error=GOOGLE_AUTH_REQUIRED "
+                f"message='No valid Google OAuth token available for doctor'"
+            )
+            raise PermissionError("GOOGLE_AUTH_REQUIRED: Doctor must authenticate with Google OAuth before creating a Meet space.")
 
-        # No access token → sandbox/mock mode only
-        if not access_token or access_token.startswith("mock_"):
-            meet_code = generate_meet_code()
-            space_id = secrets.token_urlsafe(12)
-            space_name = f"spaces/{space_id}"
-            meeting_uri = f"https://meet.google.com/{meet_code}"
-            logger.info(f"[GoogleMeet] No OAuth token — sandbox mode: {meeting_uri}")
-            return {
-                "name": space_name,
-                "meetingUri": meeting_uri,
-                "meetingCode": meet_code,
-                "config": {"accessType": access_type, "entryPointAccess": "ALL"},
-                "isMock": True,
-            }
-
-        # Real Google Meet REST API v2 call
+        # 3. Call Google Meet REST API v2
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
@@ -79,58 +73,97 @@ class GoogleMeetService:
             }
         }
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{self.api_base}/spaces",
-                headers=headers,
-                json=body,
-            )
-
-        if resp.status_code not in (200, 201):
-            # Log the error type but never log the full response body (may contain tokens)
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{self.api_base}/spaces",
+                    headers=headers,
+                    json=body,
+                )
+        except Exception as net_err:
             logger.error(
-                f"[GoogleMeet] create_space failed: HTTP {resp.status_code} "
-                f"(user={user_id}). Check Google Workspace Meet API permissions and OAuth scopes."
+                f"[GoogleMeet] requestId={req_id} operation=spaces.create user_id={user_id} "
+                f"consultationId={consultation_id} status=NETWORK_ERROR error=GOOGLE_MEET_CREATE_FAILED "
+                f"message={str(net_err)} exc={type(net_err).__name__}"
             )
-            # Raise — callers must handle this and return a proper FAILED status
-            raise RuntimeError(
-                f"Google Meet API returned HTTP {resp.status_code}. "
-                "Verify Meet API is enabled, OAuth scopes include meet.spaces.create, "
-                "and the authenticated account has Google Workspace access."
+            raise RuntimeError(f"GOOGLE_MEET_CREATE_FAILED: Network error communicating with Google Meet API: {net_err}")
+
+        # 4. Handle non-2xx responses from Google API
+        if resp.status_code not in (200, 201):
+            error_text = resp.text
+            try:
+                err_json = resp.json().get("error", {})
+                err_status = err_json.get("status", "")
+                err_message = err_json.get("message", error_text)
+            except Exception:
+                err_status = ""
+                err_message = error_text
+
+            logger.error(
+                f"[GoogleMeet] requestId={req_id} operation=spaces.create user_id={user_id} "
+                f"consultationId={consultation_id} status={resp.status_code} "
+                f"error={err_status or 'HTTP_' + str(resp.status_code)} message='{err_message}'"
             )
 
+            if resp.status_code == 401:
+                raise PermissionError("GOOGLE_TOKEN_EXPIRED: Google token rejected. Reauthentication required.")
+            if resp.status_code == 403:
+                if "PERMISSION_DENIED" in err_status or "Permission" in err_message:
+                    raise PermissionError("GOOGLE_MEET_PERMISSION_DENIED: Google did not allow this account to create a Meet space. Verify Google Workspace access.")
+                if "API_NOT_ENABLED" in err_status or "has not used" in err_message or "disabled" in err_message:
+                    raise RuntimeError("GOOGLE_MEET_API_NOT_ENABLED: Google Meet API is not enabled in Google Cloud Console.")
+                if "SCOPE" in err_status or "scope" in err_message.lower():
+                    raise PermissionError("GOOGLE_MEET_SCOPE_MISSING: Missing required Google Meet OAuth scope (meet.spaces.create).")
+                raise PermissionError(f"GOOGLE_MEET_PERMISSION_DENIED: {err_message}")
+            if resp.status_code == 429:
+                raise RuntimeError("GOOGLE_MEET_RATE_LIMITED: Google Meet API rate limit reached. Please retry in a few moments.")
+
+            raise RuntimeError(f"GOOGLE_MEET_CREATE_FAILED: Google Meet API returned HTTP {resp.status_code}: {err_message}")
+
+        # 5. Parse and validate response
         data = resp.json()
+        space_name = data.get("name")
         meeting_uri = data.get("meetingUri", "")
         meeting_code = data.get("meetingCode")
+
+        if not space_name or not meeting_uri:
+            logger.error(
+                f"[GoogleMeet] requestId={req_id} operation=spaces.create user_id={user_id} "
+                f"consultationId={consultation_id} error=GOOGLE_MEET_RESPONSE_INVALID "
+                f"message='Missing space name or meeting URI in response'"
+            )
+            raise ValueError("GOOGLE_MEET_RESPONSE_INVALID: Google Meet API returned an incomplete response payload.")
+
         if not meeting_code and meeting_uri:
             meeting_code = meeting_uri.rstrip("/").split("/")[-1]
 
-        logger.info(f"[GoogleMeet] Space created: {data.get('name')} (user={user_id})")
+        logger.info(
+            f"[GoogleMeet] requestId={req_id} space_created={space_name} "
+            f"user_id={user_id} consultationId={consultation_id}"
+        )
         return {
-            "name": data.get("name"),
+            "name": space_name,
             "meetingUri": meeting_uri,
             "meetingCode": meeting_code,
             "config": data.get("config", {}),
-            "isMock": False,
         }
 
     async def get_space(self, space_name: str, user_id: str, db: Session) -> Optional[Dict[str, Any]]:
         """Retrieves Google Meet space metadata: GET https://meet.googleapis.com/v2/{name=spaces/*}."""
         access_token = await google_oauth_service.get_valid_access_token(user_id, db)
-        if not access_token or access_token.startswith("mock_"):
-            return {
-                "name": space_name,
-                "meetingUri": f"https://meet.google.com/{space_name.replace('spaces/', '')}",
-                "meetingCode": space_name.replace("spaces/", ""),
-                "isMock": True,
-            }
+        if not access_token:
+            return None
 
         headers = {"Authorization": f"Bearer {access_token}"}
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.get(f"{self.api_base}/{space_name}", headers=headers)
-            if resp.status_code == 200:
-                return resp.json()
-            logger.warning(f"Failed to fetch space {space_name}: {resp.status_code}")
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.get(f"{self.api_base}/{space_name}", headers=headers)
+                if resp.status_code == 200:
+                    return resp.json()
+                logger.warning(f"[GoogleMeet] Failed to fetch space {space_name}: HTTP {resp.status_code}")
+                return None
+        except Exception as e:
+            logger.error(f"[GoogleMeet] get_space error: {e}")
             return None
 
     async def find_conference_records_for_space(
@@ -144,30 +177,26 @@ class GoogleMeetService:
         GET https://meet.googleapis.com/v2/conferenceRecords?filter=space.name="{space_name}"
         """
         access_token = await google_oauth_service.get_valid_access_token(user_id, db)
-        if not access_token or access_token.startswith("mock_"):
-            return [
-                {
-                    "name": f"conferenceRecords/{space_name.replace('spaces/', 'cr-')}",
-                    "startTime": (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat(),
-                    "endTime": datetime.now(timezone.utc).isoformat(),
-                    "space": space_name,
-                    "isMock": True,
-                }
-            ]
+        if not access_token:
+            return []
 
         headers = {"Authorization": f"Bearer {access_token}"}
         params = {"filter": f'space.name="{space_name}"'}
 
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            resp = await client.get(
-                f"{self.api_base}/conferenceRecords",
-                headers=headers,
-                params=params,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                return data.get("conferenceRecords", [])
-            logger.warning(f"Error querying conference records for {space_name}: {resp.status_code}")
+        try:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                resp = await client.get(
+                    f"{self.api_base}/conferenceRecords",
+                    headers=headers,
+                    params=params,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return data.get("conferenceRecords", [])
+                logger.warning(f"[GoogleMeet] Conference records query for {space_name} returned HTTP {resp.status_code}")
+                return []
+        except Exception as e:
+            logger.error(f"[GoogleMeet] find_conference_records error: {e}")
             return []
 
     async def get_conference_record(
@@ -178,19 +207,18 @@ class GoogleMeetService:
     ) -> Optional[Dict[str, Any]]:
         """Gets details of a single conference record."""
         access_token = await google_oauth_service.get_valid_access_token(user_id, db)
-        if not access_token or access_token.startswith("mock_"):
-            return {
-                "name": conference_record_name,
-                "startTime": (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat(),
-                "endTime": datetime.now(timezone.utc).isoformat(),
-                "isMock": True,
-            }
+        if not access_token:
+            return None
 
         headers = {"Authorization": f"Bearer {access_token}"}
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.get(f"{self.api_base}/{conference_record_name}", headers=headers)
-            if resp.status_code == 200:
-                return resp.json()
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.get(f"{self.api_base}/{conference_record_name}", headers=headers)
+                if resp.status_code == 200:
+                    return resp.json()
+                return None
+        except Exception as e:
+            logger.error(f"[GoogleMeet] get_conference_record error: {e}")
             return None
 
     async def get_participants(
@@ -204,46 +232,36 @@ class GoogleMeetService:
         GET https://meet.googleapis.com/v2/{parent=conferenceRecords/*}/participants
         """
         access_token = await google_oauth_service.get_valid_access_token(user_id, db)
-        if not access_token or access_token.startswith("mock_"):
-            return [
-                {
-                    "name": f"{conference_record_name}/participants/p_doctor",
-                    "signedinUser": {"user": "users/doctor", "displayName": "Doctor"},
-                    "earliestStartTime": (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat(),
-                    "latestEndTime": datetime.now(timezone.utc).isoformat(),
-                },
-                {
-                    "name": f"{conference_record_name}/participants/p_patient",
-                    "signedinUser": {"user": "users/patient", "displayName": "Patient"},
-                    "earliestStartTime": (datetime.now(timezone.utc) - timedelta(minutes=14)).isoformat(),
-                    "latestEndTime": datetime.now(timezone.utc).isoformat(),
-                },
-            ]
+        if not access_token:
+            return []
 
         headers = {"Authorization": f"Bearer {access_token}"}
         all_participants = []
         page_token = None
 
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            while True:
-                params = {"pageSize": 50}
-                if page_token:
-                    params["pageToken"] = page_token
+        try:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                while True:
+                    params = {"pageSize": 50}
+                    if page_token:
+                        params["pageToken"] = page_token
 
-                resp = await client.get(
-                    f"{self.api_base}/{conference_record_name}/participants",
-                    headers=headers,
-                    params=params,
-                )
-                if resp.status_code != 200:
-                    logger.warning(f"Error fetching participants: {resp.status_code}")
-                    break
+                    resp = await client.get(
+                        f"{self.api_base}/{conference_record_name}/participants",
+                        headers=headers,
+                        params=params,
+                    )
+                    if resp.status_code != 200:
+                        logger.warning(f"[GoogleMeet] Error fetching participants: HTTP {resp.status_code}")
+                        break
 
-                data = resp.json()
-                all_participants.extend(data.get("participants", []))
-                page_token = data.get("nextPageToken")
-                if not page_token:
-                    break
+                    data = resp.json()
+                    all_participants.extend(data.get("participants", []))
+                    page_token = data.get("nextPageToken")
+                    if not page_token:
+                        break
+        except Exception as e:
+            logger.error(f"[GoogleMeet] get_participants error: {e}")
 
         return all_participants
 

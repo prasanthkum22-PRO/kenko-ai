@@ -61,6 +61,11 @@ class GoogleOAuthService:
         """Checks whether real Google Cloud OAuth credentials have been provided."""
         return bool(self.client_id and self.client_secret)
 
+    @property
+    def is_mock_mode(self) -> bool:
+        """Explicit mock mode flag. Default: false."""
+        return os.getenv("GOOGLE_MEET_MOCK_MODE", "false").lower() == "true"
+
     def get_redirect_uri_for_request(self, return_url: Optional[str] = None) -> str:
         """Determines the appropriate redirect_uri based on the originating request."""
         if return_url and ("localhost" in return_url or "127.0.0.1" in return_url):
@@ -79,7 +84,11 @@ class GoogleOAuthService:
         Includes a state parameter with a cryptographic token, user identifier, consultation/appointment IDs, and return_url.
         """
         nonce = secrets.token_urlsafe(16)
-        state_payload = {"uid": user_id, "nonce": nonce}
+        state_payload = {
+            "uid": user_id,
+            "nonce": nonce,
+            "exp": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
+        }
         if return_url:
             state_payload["return_url"] = return_url
         if consultation_id:
@@ -110,14 +119,12 @@ class GoogleOAuthService:
         )
 
         if not self.is_configured:
-            mock_target = return_url or f"{self.frontend_url}/consultations"
-            sep = "&" if "?" in mock_target else "?"
-            mock_auth_url = f"{mock_target}{sep}google_mock_auth=success&uid={user_id}&state={urllib.parse.quote(state_data)}"
             return {
-                "auth_url": mock_auth_url,
+                "auth_url": "",
                 "state": state_data,
                 "is_configured": False,
-                "message": "Google Cloud Client ID not set in .env. Running in test mode.",
+                "error": "GOOGLE_OAUTH_NOT_CONFIGURED",
+                "message": "Google Cloud OAuth credentials (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET) are not configured.",
             }
 
         params = {
@@ -126,7 +133,7 @@ class GoogleOAuthService:
             "response_type": "code",
             "scope": " ".join(REQUIRED_SCOPES),
             "access_type": "offline",              # Required to receive a refresh token
-            "prompt": "consent select_account",    # Guarantees Google returns refresh_token every time
+            "prompt": "consent select_account",    # Guarantees Google returns refresh_token
             "include_granted_scopes": "true",
             "state": state_data,
         }
@@ -188,7 +195,6 @@ class GoogleOAuthService:
         if return_url:
             try:
                 parsed = urllib.parse.urlparse(return_url)
-                # Path parts: e.g. /video-consultation/{id} or /consultation-workspace/{id} or /telehealth/{id}
                 path_parts = [p for p in parsed.path.split('/') if p]
                 if not consultation_id and path_parts:
                     for part in reversed(path_parts):
@@ -211,24 +217,8 @@ class GoogleOAuthService:
         )
 
         if not self.is_configured:
-            mock_token = self._save_or_update_token(
-                db=db,
-                user_id=user_id,
-                email="doctor@medibridge.ai",
-                access_token="mock_meet_access_token_" + secrets.token_hex(16),
-                refresh_token="mock_meet_refresh_token_" + secrets.token_hex(16),
-                expires_in=86400 * 30,
-                scopes=" ".join(REQUIRED_SCOPES),
-            )
-            return {
-                "success": True,
-                "user_id": user_id,
-                "email": mock_token.email,
-                "return_url": return_url,
-                "consultation_id": consultation_id,
-                "appointment_id": appointment_id,
-                "is_mock": True,
-            }
+            logger.error("[OAuth Callback] GOOGLE_OAUTH_NOT_CONFIGURED during code exchange.")
+            raise ValueError("GOOGLE_OAUTH_NOT_CONFIGURED: Google OAuth client credentials missing on backend.")
 
         redirect_uri_used = self.get_redirect_uri_for_request(return_url)
         logger.info(f"[OAuth Callback] Initiating token exchange with redirect_uri={redirect_uri_used}")
@@ -300,37 +290,23 @@ class GoogleOAuthService:
             GoogleOAuthToken.is_valid == True,
         ).first()
 
-        # Fallback to any active token in DB if specific user_id not found (e.g. system default)
+        # Fallback to any active token in DB if specific user_id not found (e.g. single doctor system)
         if not token_rec:
             token_rec = db.query(GoogleOAuthToken).filter(GoogleOAuthToken.is_valid == True).first()
 
-        if not token_rec:
-            if not self.is_configured:
-                # Auto-create mock token for offline/development use
-                token_rec = self._save_or_update_token(
-                    db=db,
-                    user_id=user_id,
-                    email="doctor@medibridge.ai",
-                    access_token="mock_meet_access_token_" + secrets.token_hex(16),
-                    refresh_token="mock_meet_refresh_token_" + secrets.token_hex(16),
-                    expires_in=86400 * 30,
-                    scopes=" ".join(REQUIRED_SCOPES),
-                )
-                return token_rec.access_token
+        if not token_rec or not token_rec.access_token:
             return None
 
-        # Check if token is mock or custom
-        if token_rec.access_token and token_rec.access_token.startswith(("mock_", "custom_")):
-            return token_rec.access_token
-
-        # Check expiration (with a 5-minute safety buffer)
+        # Check expiration (with a 2-minute safety buffer)
         now = datetime.now(timezone.utc)
-        if token_rec.expires_at and token_rec.expires_at > (now + timedelta(minutes=5)):
+        if token_rec.expires_at and token_rec.expires_at > (now + timedelta(minutes=2)):
             return token_rec.access_token
 
         # Token is expired or about to expire; refresh it
         if not token_rec.refresh_token:
             logger.warning("No refresh token stored for Google OAuth user.")
+            token_rec.is_valid = False
+            db.commit()
             return None
 
         try:
@@ -351,6 +327,7 @@ class GoogleOAuthService:
                     token_rec.expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
                     if "refresh_token" in new_tokens:
                         token_rec.refresh_token = new_tokens["refresh_token"]
+                    token_rec.is_valid = True
                     token_rec.updated_at = datetime.now(timezone.utc)
                     db.commit()
                     return token_rec.access_token
@@ -373,18 +350,24 @@ class GoogleOAuthService:
         if not token_rec:
             token_rec = db.query(GoogleOAuthToken).filter(GoogleOAuthToken.is_valid == True).first()
 
-        if not token_rec:
+        if not token_rec or not token_rec.is_valid:
             return {
+                "connected": False,
                 "is_connected": False,
+                "googleEmail": None,
                 "email": None,
+                "status": "GOOGLE_NOT_CONNECTED",
                 "scopes": [],
                 "expires_at": None,
-                "is_mock": not self.is_configured,
+                "is_mock": self.is_mock_mode,
             }
 
         return {
+            "connected": True,
             "is_connected": True,
+            "googleEmail": token_rec.email,
             "email": token_rec.email,
+            "status": "GOOGLE_CONNECTED",
             "scopes": (token_rec.scopes or "").split(" ") if token_rec.scopes else REQUIRED_SCOPES,
             "expires_at": token_rec.expires_at.isoformat() if token_rec.expires_at else None,
             "is_mock": token_rec.access_token.startswith("mock_") if token_rec.access_token else False,

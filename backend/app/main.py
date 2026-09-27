@@ -58,6 +58,30 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error(f"Database initialization error: {exc}")
 
+    # Validate Google OAuth & Meet Configuration
+    client_id = os.getenv("GOOGLE_CLIENT_ID", "")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "")
+    frontend_url = os.getenv("FRONTEND_URL", "")
+
+    missing_google = []
+    if not client_id:
+        missing_google.append("GOOGLE_CLIENT_ID")
+    if not client_secret:
+        missing_google.append("GOOGLE_CLIENT_SECRET")
+    if not redirect_uri:
+        missing_google.append("GOOGLE_REDIRECT_URI")
+    if not frontend_url:
+        missing_google.append("FRONTEND_URL")
+
+    if missing_google:
+        logger.warning(f"Google OAuth: NOT CONFIGURED (Reason: {', '.join(missing_google)} missing)")
+        logger.warning("Google Meet: NOT CONFIGURED (Requires Google OAuth credentials)")
+    else:
+        id_preview = f"...{client_id[-14:]}" if len(client_id) > 14 else "CONFIGURED"
+        logger.info(f"Google OAuth: CONFIGURED (Client ID: {id_preview}, Redirect URI: {redirect_uri})")
+        logger.info("Google Meet API: CONFIGURED")
+
     # Ensure uploads directories exist
     uploads_dir = Path(__file__).resolve().parent.parent / "uploads"
     uploads_dir.mkdir(exist_ok=True)

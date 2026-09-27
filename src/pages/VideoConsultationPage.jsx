@@ -17,13 +17,14 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase/config';
 import {
   getConsultation,
   getTranscript,
   summarizeConsultation,
   getAppointment,
   getAppointmentFull,
-  createAppointmentMeet,
 } from '../services/api';
 import {
   getAppointmentFirestore,
@@ -139,19 +140,6 @@ export default function VideoConsultationPage() {
             let meetingUri = aptFs.googleMeetingUri || aptFs.googleMeet?.meetingUri || aptFs.google_meeting_uri;
             let meetingCode = aptFs.googleMeetingCode || aptFs.googleMeet?.meetingCode || aptFs.google_meeting_code;
             let spaceName = aptFs.googleSpaceName || aptFs.googleMeet?.spaceName || aptFs.google_space_name;
-
-            if (!meetingUri && isDoctor) {
-              try {
-                const meetRes = await createAppointmentMeet(urlAppointmentId);
-                if (meetRes?.meetingUri || meetRes?.meeting?.meetingUri) {
-                  meetingUri = meetRes.meetingUri || meetRes.meeting?.meetingUri;
-                  meetingCode = meetRes.meetingCode || meetRes.meeting?.meetingCode;
-                  spaceName = meetRes.spaceName || meetRes.meeting?.spaceName;
-                }
-              } catch (mErr) {
-                console.debug('Meet space creation note:', mErr);
-              }
-            }
 
             const mergedAppt = {
               id: aptFs.id,
@@ -321,6 +309,85 @@ export default function VideoConsultationPage() {
   useEffect(() => {
     if (urlConsultationId || urlAppointmentId) loadData();
   }, [loadData]);
+
+  // Real-time Firestore synchronization for appointment & consultation
+  useEffect(() => {
+    const unsubscribes = [];
+
+    if (urlAppointmentId) {
+      try {
+        const unsubAppt = onSnapshot(doc(db, 'appointments', urlAppointmentId), (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            const uri = data.googleMeetingUri || data.googleMeet?.meetingUri || data.meeting?.meetingUrl || null;
+            const code = data.googleMeetingCode || data.googleMeet?.meetingCode || data.meeting?.meetingCode || (uri ? uri.split('/').pop() : null);
+            const space = data.googleSpaceName || data.googleMeet?.spaceName || data.meeting?.spaceName || null;
+            const meetStatus = data.meetStatus || (uri ? 'READY' : 'SCHEDULED');
+            const status = data.status || 'SCHEDULED';
+
+            setAppointment((prev) => ({
+              ...prev,
+              google_meeting_uri: uri,
+              google_meeting_code: code,
+              google_space_name: space,
+              meet_status: meetStatus,
+              status: status,
+            }));
+
+            if (uri) {
+              setConsultation((prev) => (prev ? {
+                ...prev,
+                google_meeting_uri: uri,
+                google_meeting_code: code,
+                google_space_name: space,
+                meeting_status: 'meet_ready',
+                status: prev.status === 'completed' ? 'completed' : 'in_progress',
+              } : prev));
+              setTimerActive(true);
+            }
+          }
+        });
+        unsubscribes.push(unsubAppt);
+      } catch (err) {
+        console.debug('Firestore appt realtime listener note:', err);
+      }
+    }
+
+    if (consultationId) {
+      try {
+        const unsubConsult = onSnapshot(doc(db, 'consultations', consultationId), (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            const uri = data.googleMeetingUri || data.googleMeet?.meetingUri || data.meeting?.meetingUrl || null;
+            const code = data.googleMeetingCode || data.googleMeet?.meetingCode || data.meeting?.meetingCode || (uri ? uri.split('/').pop() : null);
+            const space = data.googleSpaceName || data.googleMeet?.spaceName || data.meeting?.spaceName || null;
+            const mStatus = data.meetingStatus || (uri ? 'meet_ready' : 'scheduled');
+            const status = data.status || 'SCHEDULED';
+
+            if (uri || data.meetingStatus) {
+              setConsultation((prev) => (prev ? {
+                ...prev,
+                google_meeting_uri: uri || prev.google_meeting_uri,
+                google_meeting_code: code || prev.google_meeting_code,
+                google_space_name: space || prev.google_space_name,
+                meeting_status: mStatus,
+                status: status,
+              } : prev));
+            }
+          }
+        });
+        unsubscribes.push(unsubConsult);
+      } catch (err) {
+        console.debug('Firestore consult realtime listener note:', err);
+      }
+    }
+
+    return () => {
+      unsubscribes.forEach((unsub) => {
+        try { unsub(); } catch {}
+      });
+    };
+  }, [urlAppointmentId, consultationId]);
 
   useEffect(() => {
     const authParam = searchParams.get('google_auth');

@@ -230,8 +230,13 @@ class GoogleAuthUrlResponse(BaseModel):
 
 
 class GoogleAuthStatusResponse(BaseModel):
-    is_connected: bool
+    model_config = ConfigDict(populate_by_name=True)
+
+    connected: bool = False
+    is_connected: bool = False
+    googleEmail: Optional[str] = None
     email: Optional[str] = None
+    status: str = "GOOGLE_NOT_CONNECTED"
     scopes: Optional[List[str]] = None
     expires_at: Optional[str] = None
     is_mock: bool = False

@@ -79,6 +79,32 @@ def init_db():
                     except Exception:
                         pass
 
+            # Check existing columns in appointments table
+            res_apt = conn.exec_driver_sql("PRAGMA table_info(appointments)").fetchall()
+            existing_apt_cols = {row[1] for row in res_apt}
+            new_apt_columns = [
+                ("patient_age", "INTEGER"),
+                ("patient_gender", "VARCHAR(16)"),
+                ("patient_language", "VARCHAR(64) DEFAULT 'English'"),
+                ("doctor_id", "VARCHAR(64)"),
+                ("doctor_name", "VARCHAR(128) DEFAULT 'Dr. Aarav Patel'"),
+                ("doctor_specialization", "VARCHAR(128) DEFAULT 'General Medicine'"),
+                ("appointment_type", "VARCHAR(32) DEFAULT 'video'"),
+                ("scheduled_end", "DATETIME"),
+                ("google_space_name", "VARCHAR(256)"),
+                ("google_meeting_uri", "VARCHAR(512)"),
+                ("google_meeting_code", "VARCHAR(64)"),
+                ("meet_status", "VARCHAR(64) DEFAULT 'SCHEDULED'"),
+                ("consultation_id", "VARCHAR(36)"),
+                ("updated_at", "DATETIME"),
+            ]
+            for col_name, col_type in new_apt_columns:
+                if col_name not in existing_apt_cols:
+                    try:
+                        conn.exec_driver_sql(f"ALTER TABLE appointments ADD COLUMN {col_name} {col_type}")
+                    except Exception:
+                        pass
+
             # Check existing columns in transcript_segments table
             res_ts = conn.exec_driver_sql("PRAGMA table_info(transcript_segments)").fetchall()
             existing_ts_cols = {row[1] for row in res_ts}
