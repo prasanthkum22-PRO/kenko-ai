@@ -5,11 +5,19 @@
  */
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../context/ToastContext';
 import {
   adminGetApplication, adminApproveApplication,
   adminRejectApplication, adminRequestMoreInfo,
 } from '../../services/api';
+import {
+  approveDoctorApplicationFirestore,
+  rejectDoctorApplicationFirestore,
+  requestMoreInfoDoctorApplicationFirestore,
+} from '../../services/firestoreService';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../firebase/config';
 import {
   IconStethoscope, IconBadgeCheck, IconThumbsUp, IconThumbsDown,
   IconMessageSquare, IconGlobe, IconTag, IconClock,
@@ -18,6 +26,7 @@ import {
 export default function AdminApplicationReviewPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { success, error: toastError } = useToast();
   const [app, setApp] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -26,10 +35,54 @@ export default function AdminApplicationReviewPage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    adminGetApplication(id)
-      .then(setApp)
-      .catch(() => toastError('Application not found', 'Error'))
-      .finally(() => setLoading(false));
+    let active = true;
+    async function fetchDetail() {
+      setLoading(true);
+      try {
+        const data = await adminGetApplication(id);
+        if (active && data) {
+          setApp(data);
+          setLoading(false);
+          return;
+        }
+      } catch {}
+
+      try {
+        const docRef = doc(db, 'doctorApplications', id);
+        const snap = await getDoc(docRef);
+        if (active && snap.exists()) {
+          const d = snap.data();
+          setApp({
+            id: snap.id,
+            user_id: d.userId,
+            full_name: d.fullName,
+            email: d.email,
+            phone: d.phone,
+            medical_degree: d.medicalDegree,
+            specialization: d.specialization,
+            registration_number: d.registrationNumber,
+            years_of_experience: d.yearsOfExperience,
+            organization: d.organization,
+            professional_bio: d.professionalBio,
+            languages: d.languages || [],
+            areas_of_practice: d.areasOfPractice || [],
+            status: d.status,
+            review_message: d.reviewMessage,
+            submitted_at: d.submittedAt?.toDate ? d.submittedAt.toDate().toISOString() : d.submittedAt,
+            reviewed_at: d.reviewedAt?.toDate ? d.reviewedAt.toDate().toISOString() : d.reviewedAt,
+          });
+          setLoading(false);
+          return;
+        }
+      } catch {}
+
+      if (active) {
+        toastError('Application not found', 'Error');
+        setLoading(false);
+      }
+    }
+    fetchDetail();
+    return () => { active = false; };
   }, [id]);
 
   const handleAction = async () => {
@@ -40,13 +93,25 @@ export default function AdminApplicationReviewPage() {
     setSubmitting(true);
     try {
       if (action === 'approve') {
-        await adminApproveApplication(id);
+        try {
+          await adminApproveApplication(id);
+        } catch {
+          await approveDoctorApplicationFirestore(id, user || { id: 'admin' });
+        }
         success('Application approved! Doctor profile created.', 'Approved');
       } else if (action === 'reject') {
-        await adminRejectApplication(id, reason);
+        try {
+          await adminRejectApplication(id, reason);
+        } catch {
+          await rejectDoctorApplicationFirestore(id, reason, user || { id: 'admin' });
+        }
         success('Application rejected.', 'Rejected');
       } else if (action === 'request_info') {
-        await adminRequestMoreInfo(id, reason);
+        try {
+          await adminRequestMoreInfo(id, reason);
+        } catch {
+          await requestMoreInfoDoctorApplicationFirestore(id, reason, user || { id: 'admin' });
+        }
         success('Additional information requested.', 'Requested');
       }
       navigate('/admin/doctors/applications');

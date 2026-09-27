@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   getModerationOverview, adminListApplications, adminListPosts, adminGetAuditLogs,
 } from '../../services/api';
+import { listDoctorApplicationsForAdmin } from '../../services/firestoreService';
 import {
   IconDashboard, IconStethoscope, IconDoc, IconUsers,
   IconActivity, IconBadgeCheck, IconClock, IconSparkle,
@@ -241,11 +242,41 @@ function AdminApplicationsTab({ navigate }) {
   const [search, setSearch] = useState('');
 
   useEffect(() => {
+    let active = true;
     setLoading(true);
-    adminListApplications({ status: filter || undefined, search: search || undefined })
-      .then(data => setApps(data.applications || []))
-      .catch(() => setApps([]))
-      .finally(() => setLoading(false));
+    async function loadApps() {
+      let result = [];
+      try {
+        const data = await adminListApplications({ status: filter || undefined, search: search || undefined });
+        if (data?.applications?.length > 0) {
+          result = data.applications;
+        }
+      } catch {}
+
+      if (result.length === 0) {
+        try {
+          const fsRes = await listDoctorApplicationsForAdmin({ statusFilter: filter || null });
+          if (fsRes?.applications?.length > 0) {
+            result = fsRes.applications.map((a) => ({
+              id: a.id,
+              full_name: a.fullName,
+              email: a.email,
+              specialization: a.specialization,
+              medical_degree: a.medicalDegree,
+              status: a.status,
+              submitted_at: a.submittedAt?.toDate ? a.submittedAt.toDate().toISOString() : a.submittedAt,
+            }));
+          }
+        } catch {}
+      }
+
+      if (active) {
+        setApps(result);
+        setLoading(false);
+      }
+    }
+    loadApps();
+    return () => { active = false; };
   }, [filter, search]);
 
   const STATUSES = ['', 'PENDING', 'UNDER_REVIEW', 'APPROVED', 'REJECTED', 'REQUIRES_MORE_INFORMATION'];

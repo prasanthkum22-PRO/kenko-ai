@@ -193,6 +193,46 @@ export const approveDoctorApplicationFirestore = async (applicationId, adminUser
   return { success: true };
 };
 
+export const rejectDoctorApplicationFirestore = async (applicationId, reason, adminUser) => {
+  const appRef = doc(db, 'doctorApplications', applicationId);
+  const appSnap = await getDoc(appRef);
+  if (!appSnap.exists()) throw new Error('Application not found.');
+  const appData = appSnap.data();
+  const now = serverTimestamp();
+
+  await updateDoc(appRef, {
+    status: 'REJECTED',
+    reviewMessage: reason,
+    reviewedAt: now,
+    reviewedBy: adminUser?.uid || adminUser?.id || 'admin',
+    updatedAt: now,
+  });
+
+  if (appData.userId) {
+    await updateDoc(doc(db, 'users', appData.userId), {
+      role: 'PATIENT',
+      updatedAt: now,
+    }).catch(() => null);
+  }
+
+  return { success: true };
+};
+
+export const requestMoreInfoDoctorApplicationFirestore = async (applicationId, message, adminUser) => {
+  const appRef = doc(db, 'doctorApplications', applicationId);
+  const now = serverTimestamp();
+
+  await updateDoc(appRef, {
+    status: 'REQUIRES_MORE_INFORMATION',
+    reviewMessage: message,
+    reviewedAt: now,
+    reviewedBy: adminUser?.uid || adminUser?.id || 'admin',
+    updatedAt: now,
+  });
+
+  return { success: true };
+};
+
 // ─── 3. DOCTOR PROFILES (doctorProfiles/{doctorId}) ──────────────────────────
 
 export const listVerifiedDoctorsFirestore = async ({ specialization = null, pageSize = 12, lastDoc = null } = {}) => {

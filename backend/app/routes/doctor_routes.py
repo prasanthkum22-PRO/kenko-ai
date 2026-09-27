@@ -23,6 +23,7 @@ from app.models.db_models import (
     UserNotification, AuditLog
 )
 from app.utils.auth import require_authenticated_user, require_role
+from app.services.firebase_service import firebase_service
 
 logger = logging.getLogger(__name__)
 
@@ -151,11 +152,36 @@ async def submit_doctor_application(
             "Your application has been submitted. Our administration team will review it shortly.",
             ntype="info", related_type="doctor_application", related_id=app.id)
 
-    _audit(db, current_user.id, "DOCTOR_APPLICATION_SUBMITTED", "doctor_application", app.id,
-           {"specialization": specialization})
-
     db.commit()
     db.refresh(app)
+
+    # Sync application and pending role to Firestore
+    try:
+        await firebase_service.write_document("doctorApplications", app.id, {
+            "id": app.id,
+            "userId": current_user.id,
+            "fullName": full_name,
+            "email": email,
+            "phone": phone,
+            "medicalDegree": medical_degree,
+            "specialization": specialization,
+            "registrationNumber": registration_number,
+            "yearsOfExperience": years_of_experience,
+            "organization": organization,
+            "professionalBio": professional_bio,
+            "languages": langs,
+            "areasOfPractice": areas,
+            "status": "PENDING",
+            "submittedAt": datetime.now(timezone.utc),
+            "createdAt": datetime.now(timezone.utc),
+            "updatedAt": datetime.now(timezone.utc),
+        })
+        await firebase_service.write_document("users", current_user.id, {
+            "role": "DOCTOR_PENDING",
+            "updatedAt": datetime.now(timezone.utc),
+        })
+    except Exception as fe:
+        logger.debug(f"Firestore doctor application sync note: {fe}")
 
     return {
         "success": True,
@@ -288,7 +314,7 @@ def admin_get_application(
 
 
 @router.post("/admin/doctor-applications/{app_id}/approve", summary="[ADMIN] Approve a doctor application")
-def admin_approve_application(
+async def admin_approve_application(
     app_id: str,
     admin: User = Depends(require_role(["ADMIN"])),
     db: Session = Depends(get_db),
@@ -347,11 +373,45 @@ def admin_approve_application(
 
     db.commit()
 
+    # 6. Sync approval and profile to Firestore
+    try:
+        await firebase_service.write_document("doctorApplications", app.id, {
+            "status": "APPROVED",
+            "reviewedAt": now,
+            "reviewedBy": admin.id,
+            "updatedAt": now,
+        })
+        if user:
+            await firebase_service.write_document("users", user.id, {
+                "role": "DOCTOR",
+                "doctorId": user.doctor_id,
+                "updatedAt": now,
+            })
+            await firebase_service.write_document("doctorProfiles", user.id, {
+                "userId": user.id,
+                "displayName": app.full_name,
+                "specialization": app.specialization,
+                "medicalDegree": app.medical_degree,
+                "registrationNumber": app.registration_number,
+                "yearsOfExperience": app.years_of_experience,
+                "organization": app.organization,
+                "professionalBio": app.professional_bio,
+                "languages": app.languages or [],
+                "areasOfPractice": app.areas_of_practice or [],
+                "verificationStatus": "VERIFIED",
+                "verifiedAt": now,
+                "verifiedBy": admin.id,
+                "createdAt": now,
+                "updatedAt": now,
+            })
+    except Exception as fe:
+        logger.debug(f"Firestore doctor approval sync note: {fe}")
+
     return {"success": True, "message": f"Doctor application approved. User {app.full_name} is now a verified doctor."}
 
 
 @router.post("/admin/doctor-applications/{app_id}/reject", summary="[ADMIN] Reject a doctor application")
-def admin_reject_application(
+async def admin_reject_application(
     app_id: str,
     reason: str = Form(...),
     admin: User = Depends(require_role(["ADMIN"])),
@@ -382,11 +442,28 @@ def admin_reject_application(
            {"reason": reason, "applicant_user_id": app.user_id})
 
     db.commit()
+
+    try:
+        await firebase_service.write_document("doctorApplications", app.id, {
+            "status": "REJECTED",
+            "reviewMessage": reason,
+            "reviewedAt": now,
+            "reviewedBy": admin.id,
+            "updatedAt": now,
+        })
+        if user and user.role == "PATIENT":
+            await firebase_service.write_document("users", user.id, {
+                "role": "PATIENT",
+                "updatedAt": now,
+            })
+    except Exception as fe:
+        logger.debug(f"Firestore doctor reject sync note: {fe}")
+
     return {"success": True, "message": "Application rejected."}
 
 
 @router.post("/admin/doctor-applications/{app_id}/request-info", summary="[ADMIN] Request more information")
-def admin_request_info(
+async def admin_request_info(
     app_id: str,
     message: str = Form(...),
     admin: User = Depends(require_role(["ADMIN"])),
@@ -396,10 +473,11 @@ def admin_request_info(
     if not app:
         raise HTTPException(status_code=404, detail="Application not found.")
 
+    now = datetime.now(timezone.utc)
     app.status = "REQUIRES_MORE_INFORMATION"
     app.review_message = message
     app.reviewed_by = admin.id
-    app.reviewed_at = datetime.now(timezone.utc)
+    app.reviewed_at = now
 
     user = db.query(User).filter(User.id == app.user_id).first()
     if user:
@@ -411,6 +489,18 @@ def admin_request_info(
     _audit(db, admin.id, "DOCTOR_APPLICATION_CHANGES_REQUESTED", "doctor_application", app.id, {"message": message})
 
     db.commit()
+
+    try:
+        await firebase_service.write_document("doctorApplications", app.id, {
+            "status": "REQUIRES_MORE_INFORMATION",
+            "reviewMessage": message,
+            "reviewedAt": now,
+            "reviewedBy": admin.id,
+            "updatedAt": now,
+        })
+    except Exception as fe:
+        logger.debug(f"Firestore doctor request-info sync note: {fe}")
+
     return {"success": True, "message": "Request for more information sent."}
 
 

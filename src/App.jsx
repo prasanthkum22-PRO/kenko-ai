@@ -259,6 +259,14 @@ export default function App() {
                         }
                       />
                       <Route
+                        path="/admin/doctors/applications/:id"
+                        element={
+                          <RoleGuard allowedRoles={['admin']}>
+                            <AdminApplicationReviewPage />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
                         path="/admin/posts/:id"
                         element={
                           <RoleGuard allowedRoles={['admin']}>

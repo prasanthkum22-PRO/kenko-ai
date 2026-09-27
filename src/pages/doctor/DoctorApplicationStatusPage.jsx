@@ -4,7 +4,9 @@
  */
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../hooks/useAuth';
 import { getMyDoctorApplication } from '../../services/api';
+import { getMyDoctorApplicationFirestore } from '../../services/firestoreService';
 import { IconStethoscope, IconClock, IconCheckCircle, IconXCircle, IconMessageSquare } from '../../components/icons';
 
 const STATUS_CONFIG = {
@@ -27,7 +29,7 @@ const STATUS_CONFIG = {
     color: 'var(--color-success)',
     bg: 'var(--color-success-light, #dcfce7)',
     icon: IconCheckCircle,
-    desc: 'Congratulations! Your application has been approved. Please log out and log back in to access your Doctor Dashboard.',
+    desc: 'Congratulations! Your application has been approved. You now have full access to your Doctor Dashboard.',
   },
   REJECTED: {
     label: 'Not Approved',
@@ -47,15 +49,49 @@ const STATUS_CONFIG = {
 
 export default function DoctorApplicationStatusPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [app, setApp] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getMyDoctorApplication()
-      .then(data => setApp(data.application))
-      .catch(() => setApp(null))
-      .finally(() => setLoading(false));
-  }, []);
+    let active = true;
+    async function fetchStatus() {
+      setLoading(true);
+      try {
+        const data = await getMyDoctorApplication();
+        if (active && data?.application) {
+          setApp(data.application);
+          setLoading(false);
+          return;
+        }
+      } catch {}
+
+      if (user?.uid || user?.id) {
+        try {
+          const fsApp = await getMyDoctorApplicationFirestore(user.uid || user.id);
+          if (active && fsApp) {
+            setApp({
+              id: fsApp.id,
+              status: fsApp.status,
+              full_name: fsApp.fullName,
+              email: fsApp.email,
+              specialization: fsApp.specialization,
+              medical_degree: fsApp.medicalDegree,
+              registration_number: fsApp.registrationNumber,
+              submitted_at: fsApp.submittedAt?.toDate ? fsApp.submittedAt.toDate().toISOString() : fsApp.submittedAt,
+              review_message: fsApp.reviewMessage,
+            });
+            setLoading(false);
+            return;
+          }
+        } catch {}
+      }
+
+      if (active) setLoading(false);
+    }
+    fetchStatus();
+    return () => { active = false; };
+  }, [user]);
 
   if (loading) {
     return (

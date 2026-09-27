@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../context/ToastContext';
 import { submitDoctorApplication } from '../../services/api';
+import { submitDoctorApplicationFirestore } from '../../services/firestoreService';
 import {
   IconStethoscope, IconBadgeCheck, IconFileText, IconGlobe,
   IconTag, IconUsers, IconDoc, IconSend,
@@ -99,7 +100,27 @@ export default function ApplyDoctorPage() {
       if (files.qualification_doc) fd.append('qualification_doc', files.qualification_doc);
       if (files.registration_doc) fd.append('registration_doc', files.registration_doc);
 
-      await submitDoctorApplication(fd);
+      let submitted = false;
+      try {
+        await submitDoctorApplication(fd);
+        submitted = true;
+      } catch (apiErr) {
+        console.warn('Backend submit note:', apiErr);
+      }
+
+      if (user?.uid || user?.id) {
+        try {
+          await submitDoctorApplicationFirestore(user.uid || user.id, form);
+          submitted = true;
+        } catch (fsErr) {
+          console.warn('Firestore submit note:', fsErr);
+        }
+      }
+
+      if (!submitted) {
+        throw new Error('Failed to submit application to backend or database.');
+      }
+
       success('Application submitted! You will be notified once reviewed.', 'Application Submitted');
       navigate('/apply-doctor/status');
     } catch (err) {
