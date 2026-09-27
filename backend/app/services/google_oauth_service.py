@@ -61,6 +61,12 @@ class GoogleOAuthService:
         """Checks whether real Google Cloud OAuth credentials have been provided."""
         return bool(self.client_id and self.client_secret)
 
+    def get_redirect_uri_for_request(self, return_url: Optional[str] = None) -> str:
+        """Determines the appropriate redirect_uri based on the originating request."""
+        if return_url and ("localhost" in return_url or "127.0.0.1" in return_url):
+            return os.getenv("GOOGLE_LOCAL_REDIRECT_URI", "http://localhost:8000/api/google/callback")
+        return self.redirect_uri
+
     def generate_auth_url(self, user_id: str, return_url: Optional[str] = None) -> Dict[str, Any]:
         """
         Builds the Google OAuth 2.0 authorization URL.
@@ -85,9 +91,11 @@ class GoogleOAuthService:
                 "message": "Google Cloud Client ID not set in .env. Running in simulated Google Meet test mode.",
             }
 
+        redirect_uri = self.get_redirect_uri_for_request(return_url)
+
         params = {
             "client_id": self.client_id,
-            "redirect_uri": self.redirect_uri,
+            "redirect_uri": redirect_uri,
             "response_type": "code",
             "scope": " ".join(REQUIRED_SCOPES),
             "access_type": "offline",      # Required to receive a refresh token
@@ -136,6 +144,8 @@ class GoogleOAuthService:
                 "is_mock": True,
             }
 
+        redirect_uri_used = self.get_redirect_uri_for_request(return_url)
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 GOOGLE_TOKEN_ENDPOINT,
@@ -143,7 +153,7 @@ class GoogleOAuthService:
                     "code": code,
                     "client_id": self.client_id,
                     "client_secret": self.client_secret,
-                    "redirect_uri": self.redirect_uri,
+                    "redirect_uri": redirect_uri_used,
                     "grant_type": "authorization_code",
                 },
             )
