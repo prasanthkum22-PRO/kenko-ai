@@ -19,6 +19,7 @@ import {
   updateAppointmentFirestore,
 } from '../services/firestoreService';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import {
   IconGoogleMeet,
   IconGoogle,
@@ -84,6 +85,7 @@ export default function GoogleMeetCard({
   isDoctor = false,
   onViewTranscript,
 }) {
+  const { user } = useAuth();
   const { success, error: toastError, info } = useToast();
 
   const [authStatus, setAuthStatus] = useState({ is_connected: false, email: null, is_mock: false, checked: false });
@@ -329,14 +331,16 @@ export default function GoogleMeetCard({
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/userinfo.profile',
     ].join(' ');
+    const currentUid = user?.id || user?.uid || 'default_doctor';
     const statePayload = encodeURIComponent(
       JSON.stringify({
+        uid: currentUid,
         return_url: currentUrl,
         consultation_id: consultId,
         appointment_id: apptId,
       })
     );
-    const directGoogleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes)}&access_type=offline&prompt=select_account&include_granted_scopes=true&state=${statePayload}`;
+    const directGoogleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes)}&access_type=offline&prompt=consent%20select_account&include_granted_scopes=true&state=${statePayload}`;
 
     try {
       setLoading(true);
@@ -507,14 +511,30 @@ export default function GoogleMeetCard({
   };
 
   const handleEndMeet = async () => {
-    if (!consultation?.id) return;
+    const targetConsultId = consultation?.id || consultation?.consultation_id || appointment?.consultation_id;
+    if (!targetConsultId) return;
     try {
       setLoading(true);
-      await endGoogleMeet(consultation.id);
+      await endGoogleMeet(targetConsultId);
       setMeetData((prev) => ({ ...prev, meetingStatus: 'completed', transcriptStatus: 'processing' }));
       if (onStatusChange) onStatusChange('completed');
-      info('Consultation concluded.', 'Meeting Ended');
-      setTimeout(() => { handleSyncTranscript(); }, 2000);
+      info('Consultation concluded. Synchronizing conversation transcript...', 'Meeting Ended');
+      setTimeout(async () => {
+        try {
+          const res = await syncGoogleMeetTranscript(targetConsultId);
+          if (res?.transcriptStatus === 'ready' && res.entries?.length > 0) {
+            setMeetData((prev) => ({ ...prev, meetingStatus: 'completed', transcriptStatus: 'ready' }));
+            success('Transcript retrieved from Google Meet and ready for clinical review.', 'Transcript Ready');
+            if (onTranscriptReady) onTranscriptReady(res);
+            if (onViewTranscript) onViewTranscript();
+            if (onConsultationUpdated) onConsultationUpdated();
+          } else {
+            handleSyncTranscript();
+          }
+        } catch {
+          handleSyncTranscript();
+        }
+      }, 1500);
     } catch {
       toastError('Failed to complete meeting.', 'Error');
     } finally {

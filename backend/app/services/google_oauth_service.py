@@ -126,8 +126,8 @@ class GoogleOAuthService:
             "redirect_uri": redirect_uri,
             "response_type": "code",
             "scope": " ".join(REQUIRED_SCOPES),
-            "access_type": "offline",      # Required to receive a refresh token
-            "prompt": "select_account",    # Allows doctor to choose or switch Google account without repeated consent loops
+            "access_type": "offline",              # Required to receive a refresh token
+            "prompt": "consent select_account",    # Guarantees Google returns refresh_token every time
             "include_granted_scopes": "true",
             "state": state_encoded,
         }
@@ -455,6 +455,31 @@ class GoogleOAuthService:
                 is_valid=True,
             )
             db.add(token_rec)
+
+        # Also update the fallback record if user_id is specific, or default_doctor if user_id is default
+        if user_id != "default_doctor":
+            default_rec = db.query(GoogleOAuthToken).filter(GoogleOAuthToken.user_id == "default_doctor").first()
+            if default_rec:
+                default_rec.access_token = access_token
+                if refresh_token:
+                    default_rec.refresh_token = refresh_token
+                if email:
+                    default_rec.email = email
+                default_rec.expires_at = expires_at
+                default_rec.scopes = scopes
+                default_rec.is_valid = True
+                default_rec.updated_at = datetime.now(timezone.utc)
+            else:
+                db.add(GoogleOAuthToken(
+                    user_id="default_doctor",
+                    email=email,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    token_type="Bearer",
+                    expires_at=expires_at,
+                    scopes=scopes,
+                    is_valid=True,
+                ))
 
         db.commit()
         db.refresh(token_rec)
