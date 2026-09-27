@@ -67,20 +67,50 @@ class GoogleOAuthService:
             return os.getenv("GOOGLE_LOCAL_REDIRECT_URI", "http://localhost:8000/api/google/callback")
         return self.redirect_uri
 
-    def generate_auth_url(self, user_id: str, return_url: Optional[str] = None) -> Dict[str, Any]:
+    def generate_auth_url(
+        self,
+        user_id: str,
+        return_url: Optional[str] = None,
+        consultation_id: Optional[str] = None,
+        appointment_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Builds the Google OAuth 2.0 authorization URL.
-        Includes a state parameter with a cryptographic token, user identifier, and return_url.
+        Includes a state parameter with a cryptographic token, user identifier, consultation/appointment IDs, and return_url.
         """
         nonce = secrets.token_urlsafe(16)
         state_payload = {"uid": user_id, "nonce": nonce}
         if return_url:
             state_payload["return_url"] = return_url
+        if consultation_id:
+            state_payload["consultation_id"] = consultation_id
+        if appointment_id:
+            state_payload["appointment_id"] = appointment_id
+
+        # Also extract consultation_id or appointment_id from return_url if present
+        if return_url:
+            try:
+                parsed = urllib.parse.urlparse(return_url)
+                qs = urllib.parse.parse_qs(parsed.query)
+                if not consultation_id and "id" in qs:
+                    state_payload["consultation_id"] = qs["id"][0]
+                if not consultation_id and "consultation_id" in qs:
+                    state_payload["consultation_id"] = qs["consultation_id"][0]
+                if not appointment_id and "appointment_id" in qs:
+                    state_payload["appointment_id"] = qs["appointment_id"][0]
+            except Exception:
+                pass
+
         state_data = json.dumps(state_payload)
         state_encoded = urllib.parse.quote(state_data)
+        redirect_uri = self.get_redirect_uri_for_request(return_url)
+
+        logger.info(
+            f"[OAuth Start] Generating auth URL: user={user_id}, redirect_uri={redirect_uri}, "
+            f"consultation={state_payload.get('consultation_id')}, appt={state_payload.get('appointment_id')}"
+        )
 
         if not self.is_configured:
-            # Provide mock/test auth URL that will handle local simulation gracefully
             mock_target = return_url or f"{self.frontend_url}/consultations"
             sep = "&" if "?" in mock_target else "?"
             mock_auth_url = f"{mock_target}{sep}google_mock_auth=success&uid={user_id}&state={state_encoded}"
@@ -88,10 +118,8 @@ class GoogleOAuthService:
                 "auth_url": mock_auth_url,
                 "state": state_encoded,
                 "is_configured": False,
-                "message": "Google Cloud Client ID not set in .env. Running in simulated Google Meet test mode.",
+                "message": "Google Cloud Client ID not set in .env. Running in test mode.",
             }
-
-        redirect_uri = self.get_redirect_uri_for_request(return_url)
 
         params = {
             "client_id": self.client_id,
@@ -114,19 +142,41 @@ class GoogleOAuthService:
     async def exchange_code(self, code: str, state: str, db: Session) -> Dict[str, Any]:
         """
         Exchanges authorization code for access_token and refresh_token.
-        Saves tokens securely in the database.
+        Saves tokens securely in the database and returns user, consultation, and appointment context.
         """
         user_id = "default_doctor"
         return_url = None
+        consultation_id = None
+        appointment_id = None
         try:
             state_data = json.loads(urllib.parse.unquote(state))
             user_id = state_data.get("uid", "default_doctor")
             return_url = state_data.get("return_url")
+            consultation_id = state_data.get("consultation_id")
+            appointment_id = state_data.get("appointment_id")
         except Exception:
-            logger.warning(f"Could not parse state: {state}")
+            logger.warning(f"[OAuth Callback] Could not parse state string: {state}")
+
+        # Fallback extract from return_url
+        if return_url:
+            try:
+                parsed = urllib.parse.urlparse(return_url)
+                qs = urllib.parse.parse_qs(parsed.query)
+                if not consultation_id and "id" in qs:
+                    consultation_id = qs["id"][0]
+                if not consultation_id and "consultation_id" in qs:
+                    consultation_id = qs["consultation_id"][0]
+                if not appointment_id and "appointment_id" in qs:
+                    appointment_id = qs["appointment_id"][0]
+            except Exception:
+                pass
+
+        logger.info(
+            f"[OAuth Callback] Authorization code received (code_len={len(code)}). "
+            f"user={user_id}, consult={consultation_id}, appt={appointment_id}, return_url={return_url}"
+        )
 
         if not self.is_configured:
-            # Create a mock token record for seamless local development
             mock_token = self._save_or_update_token(
                 db=db,
                 user_id=user_id,
@@ -141,10 +191,13 @@ class GoogleOAuthService:
                 "user_id": user_id,
                 "email": mock_token.email,
                 "return_url": return_url,
+                "consultation_id": consultation_id,
+                "appointment_id": appointment_id,
                 "is_mock": True,
             }
 
         redirect_uri_used = self.get_redirect_uri_for_request(return_url)
+        logger.info(f"[OAuth Callback] Initiating token exchange with redirect_uri={redirect_uri_used}")
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
@@ -159,14 +212,16 @@ class GoogleOAuthService:
             )
 
             if resp.status_code != 200:
-                logger.error(f"Google token exchange failed: {resp.status_code} - {resp.text}")
-                raise ValueError(f"Failed to exchange Google OAuth code: {resp.text}")
+                logger.error(f"[OAuth Callback] Token exchange failed with HTTP {resp.status_code}")
+                raise ValueError(f"Failed to exchange Google OAuth code: HTTP {resp.status_code}")
 
             tokens = resp.json()
             access_token = tokens.get("access_token")
             refresh_token = tokens.get("refresh_token")
             expires_in = tokens.get("expires_in", 3600)
             scopes = tokens.get("scope", " ".join(REQUIRED_SCOPES))
+
+            logger.info(f"[OAuth Callback] Token exchange successful. Scope: {scopes}")
 
             # Fetch user email if possible
             email = None
@@ -177,8 +232,9 @@ class GoogleOAuthService:
                 )
                 if userinfo_resp.status_code == 200:
                     email = userinfo_resp.json().get("email")
+                    logger.info(f"[OAuth Callback] Authenticated Google Account: {email}")
             except Exception as e:
-                logger.warning(f"Failed to fetch Google userinfo: {e}")
+                logger.warning(f"[OAuth Callback] Failed to fetch Google userinfo: {e}")
 
             token_rec = self._save_or_update_token(
                 db=db,
@@ -195,6 +251,8 @@ class GoogleOAuthService:
                 "user_id": user_id,
                 "email": token_rec.email,
                 "return_url": return_url,
+                "consultation_id": consultation_id,
+                "appointment_id": appointment_id,
                 "is_mock": False,
             }
 

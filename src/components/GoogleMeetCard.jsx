@@ -67,10 +67,50 @@ export default function GoogleMeetCard({
       const params = new URLSearchParams(window.location.search);
       const googleAuthParam = params.get('google_auth');
       const googleAuthEmail = params.get('email');
+      const meetCreatedParam = params.get('meet_created');
+      const meetingUriParam = params.get('meeting_uri');
+      const meetingCodeParam = params.get('meeting_code');
+
       if (googleAuthParam === 'success' && active) {
         success(`Google Meet account connected (${googleAuthEmail || 'authorized'})`, 'OAuth Connected');
+        setAuthStatus((prev) => ({
+          ...prev,
+          is_connected: true,
+          email: googleAuthEmail || prev.email,
+        }));
       } else if (googleAuthParam === 'error' && active) {
         toastError('Google authorization was cancelled or denied.', 'OAuth Error');
+      }
+
+      // If redirected with created meeting space
+      if ((meetCreatedParam === 'true' || meetingUriParam) && active) {
+        const cleanUri = meetingUriParam || '';
+        const cleanCode = meetingCodeParam || (cleanUri ? cleanUri.split('/').pop() : '');
+        setMeetData((prev) => ({
+          ...prev,
+          meetingUri: cleanUri,
+          meetingCode: cleanCode,
+          meetingStatus: 'meet_ready',
+        }));
+        success('Google Meet Space is ready for consultation.', 'Meeting Ready');
+        if (onStatusChange) onStatusChange('meet_ready');
+        if (onConsultationUpdated) onConsultationUpdated();
+
+        const apptId = appointment?.id || consultation?.appointment_id;
+        if (apptId && cleanUri) {
+          acceptAppointmentFirestore(apptId, cleanUri, cleanCode).catch(() => null);
+        }
+
+        // Clean query parameters from URL without reloading
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('google_auth');
+          url.searchParams.delete('meet_created');
+          url.searchParams.delete('meeting_uri');
+          url.searchParams.delete('meeting_code');
+          url.searchParams.delete('email');
+          window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+        } catch {}
       }
 
       const cachedEmail = localStorage.getItem('kenko_doctor_google_email');
@@ -124,6 +164,9 @@ export default function GoogleMeetCard({
 
   const handleConnectGoogle = async () => {
     const currentUrl = window.location.href;
+    const consultId = consultation?.id || consultation?.consultation_id || appointment?.consultation_id || null;
+    const apptId = appointment?.id || consultation?.appointment_id || null;
+
     const clientId = '48743221773-adh94vkboqogbj0mhvkja68o17ij9g5s.apps.googleusercontent.com';
     const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
     const redirectUri = isLocal
@@ -136,17 +179,23 @@ export default function GoogleMeetCard({
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/userinfo.profile',
     ].join(' ');
-    const statePayload = encodeURIComponent(JSON.stringify({ return_url: currentUrl }));
+    const statePayload = encodeURIComponent(
+      JSON.stringify({
+        return_url: currentUrl,
+        consultation_id: consultId,
+        appointment_id: apptId,
+      })
+    );
     const directGoogleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes)}&access_type=offline&prompt=select_account%20consent&include_granted_scopes=true&state=${statePayload}`;
 
     try {
       setLoading(true);
-      const res = await getGoogleAuthUrl(currentUrl).catch(() => null);
+      const res = await getGoogleAuthUrl(currentUrl, consultId, apptId).catch(() => null);
       if (res?.auth_url) {
         window.location.href = res.auth_url;
         return;
       }
-      // Direct OAuth redirect if backend endpoint is in transit
+      // Direct OAuth redirect
       window.location.href = directGoogleAuthUrl;
     } catch (err) {
       console.error('Google OAuth URL redirect note:', err);
@@ -246,6 +295,11 @@ export default function GoogleMeetCard({
       }
 
       if (!meetUri) {
+        if (!authStatus.is_connected) {
+          info('Directing to Google authorization to create consultation space...', 'OAuth Required');
+          await handleConnectGoogle();
+          return;
+        }
         setMeetCreationError((prev) => prev || 'Unable to prepare Google Meet space. Please connect your Google account.');
         setMeetData((prev) => ({ ...prev, meetingStatus: 'meet_creation_failed' }));
         toastError('Failed to create Google Meet space. Please connect your Google account or retry.', 'Creation Error');

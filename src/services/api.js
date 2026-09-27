@@ -196,9 +196,17 @@ export const askConsultationChat = async (id, question) => {
 
 // ─── Google Meet & OAuth API ──────────────────────────────────
 
-export const getGoogleAuthUrl = async (returnUrl = null) => {
-  const params = returnUrl ? { return_url: returnUrl } : {};
+export const getGoogleAuthUrl = async (returnUrl = null, consultationId = null, appointmentId = null) => {
+  const params = {};
+  if (returnUrl) params.return_url = returnUrl;
+  if (consultationId) params.consultation_id = consultationId;
+  if (appointmentId) params.appointment_id = appointmentId;
   const res = await api.get('/api/google/auth', { params });
+  return res.data;
+};
+
+export const exchangeGoogleCallback = async (code, state = null) => {
+  const res = await api.post('/api/google/callback', { code, state });
   return res.data;
 };
 

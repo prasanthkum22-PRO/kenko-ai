@@ -62,6 +62,7 @@ const DemoPage = lazy(() => import('./pages/DemoPage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 const AccessDeniedPage = lazy(() => import('./pages/AccessDeniedPage'));
+const GoogleOAuthCallbackPage = lazy(() => import('./pages/GoogleOAuthCallbackPage'));
 
 /** Branded route-level loading fallback. */
 function RouteFallback() {
@@ -105,6 +106,12 @@ export default function App() {
                     <Route path="/landing" element={<LandingPage />} />
                     <Route path="/login" element={<LoginPage />} />
                     <Route path="/register" element={<RegisterPage />} />
+
+                    {/* Google OAuth Callbacks */}
+                    <Route path="/api/google/callback" element={<GoogleOAuthCallbackPage />} />
+                    <Route path="/auth/google/callback" element={<GoogleOAuthCallbackPage />} />
+                    <Route path="/google/callback" element={<GoogleOAuthCallbackPage />} />
+                    <Route path="/google-callback" element={<GoogleOAuthCallbackPage />} />
 
                     {/* Dedicated role login pages */}
                     <Route path="/login/admin" element={<RoleLoginPage roleKey="admin" />} />
