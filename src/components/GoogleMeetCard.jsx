@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   getGoogleAuthStatus,
   getGoogleAuthUrl,
@@ -164,7 +164,7 @@ export default function GoogleMeetCard({
         if (active) {
           setAuthStatus({ is_connected: false, email: null, checked: true });
           if (errCode === 'GOOGLE_OAUTH_NOT_CONFIGURED') {
-            // Silently set disconnected — server is not configured
+            // Silently set disconnected â€” server is not configured
           }
         }
       }
@@ -506,7 +506,7 @@ export default function GoogleMeetCard({
         if (onConsultationUpdated) onConsultationUpdated();
         info('Google Meet is ready.', 'Status Updated');
       } else {
-        info('Checked meeting status — no active space found yet.', 'Refreshed');
+        info('Checked meeting status â€” no active space found yet.', 'Refreshed');
       }
     } catch {
       toastError('Could not refresh meeting status.', 'Refresh Failed');
@@ -592,7 +592,7 @@ export default function GoogleMeetCard({
                 <h2 className="text-base font-bold text-primary" style={{ margin: 0 }}>
                   Google Meet
                 </h2>
-                <span className="text-xs text-muted">· Video consultation</span>
+                <span className="text-xs text-muted">Â· Video consultation</span>
               </div>
               <p className="text-xs text-muted mt-0.5">
                 Secure clinical video consultation
@@ -616,7 +616,7 @@ export default function GoogleMeetCard({
                     disabled={loading}
                     title="Disconnect Google Account"
                   >
-                    <span style={{ fontSize: '0.75rem' }}>✕</span>
+                    <span style={{ fontSize: '0.75rem' }}>âœ•</span>
                     <span>Disconnect</span>
                   </button>
                 </div>
@@ -999,96 +999,6 @@ export default function GoogleMeetCard({
           </div>
         </div>
       )}
-
-      {/* Edit Google Meet Account Modal */}
-      {isEditingGoogleAccount && (
-        <div
-          className="modal-backdrop animate-fade-in"
-          onClick={() => setIsEditingGoogleAccount(false)}
-        >
-          <div
-            className="modal-content animate-scale-up"
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: 440, borderRadius: '16px' }}
-          >
-            <div className="flex items-center gap-3 mb-3">
-              <div
-                style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: '10px',
-                  background: 'rgba(59, 130, 246, 0.12)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--color-primary)',
-                }}
-              >
-                <IconGoogle size={20} />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-primary" style={{ margin: 0 }}>
-                  Google Meet Account
-                </h3>
-                <p className="text-xs text-muted" style={{ margin: 0 }}>
-                  Configure Google ID for telehealth
-                </p>
-              </div>
-            </div>
-
-            <p className="text-xs text-secondary mb-4" style={{ lineHeight: 1.5 }}>
-              Enter the Google / Gmail account to use for creating Google Meet spaces. Your MediBridge login remains separate.
-            </p>
-
-            <form onSubmit={handleSaveGoogleAccount}>
-              <div className="mb-4">
-                <label className="block text-xs font-semibold text-secondary mb-1">
-                  Google Email Address
-                </label>
-                <input
-                  type="email"
-                  required
-                  placeholder="doctor@example.com"
-                  value={customGoogleEmail}
-                  onChange={(e) => setCustomGoogleEmail(e.target.value)}
-                  className="input w-full text-sm"
-                  autoFocus
-                />
-              </div>
-
-              <div className="flex items-center justify-between gap-2 pt-3 border-t border-subtle">
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm flex items-center gap-1.5"
-                  onClick={handleConnectGoogle}
-                  disabled={loading}
-                >
-                  <IconGoogle size={14} /> Connect OAuth
-                </button>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => setIsEditingGoogleAccount(false)}
-                    disabled={savingAccount}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="btn btn-primary btn-sm"
-                    disabled={savingAccount || !customGoogleEmail}
-                  >
-                    {savingAccount ? 'Saving...' : 'Save'}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
-
-
