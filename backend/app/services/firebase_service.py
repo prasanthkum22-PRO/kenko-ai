@@ -86,14 +86,25 @@ class FirebaseService:
         meet_uri: str,
         meet_code: str,
         consultation_id: Optional[str] = None,
+        doctor_id: Optional[str] = None,
     ):
-        """Store Google Meet meeting info without exposing OAuth credentials."""
+        """Store Google Meet meeting info permanently in Firestore without exposing OAuth credentials."""
+        now_dt = datetime.now(timezone.utc)
         meet_payload = {
             "spaceName": space_name,
             "meetingUri": meet_uri,
             "meetingCode": meet_code,
             "status": "READY",
-            "createdAt": datetime.now(timezone.utc),
+            "createdAt": now_dt,
+        }
+        meeting_obj = {
+            "provider": "google_meet",
+            "status": "created",
+            "meetingUrl": meet_uri,
+            "meetingCode": meet_code,
+            "spaceName": space_name,
+            "createdAt": now_dt,
+            "createdBy": doctor_id or "doctor",
         }
         appt_data = {
             "googleSpaceName": space_name,
@@ -102,7 +113,8 @@ class FirebaseService:
             "meetStatus": "READY",
             "status": "CONFIRMED",
             "googleMeet": meet_payload,
-            "updatedAt": datetime.now(timezone.utc),
+            "meeting": meeting_obj,
+            "updatedAt": now_dt,
         }
         await self.write_document("appointments", appointment_id, appt_data)
         if consultation_id:
@@ -112,7 +124,8 @@ class FirebaseService:
                 "googleMeetingCode": meet_code,
                 "meetingStatus": "meet_ready",
                 "googleMeet": meet_payload,
-                "updatedAt": datetime.now(timezone.utc),
+                "meeting": meeting_obj,
+                "updatedAt": now_dt,
             }
             await self.write_document("consultations", consultation_id, consult_data)
 

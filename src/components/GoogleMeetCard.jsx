@@ -66,7 +66,13 @@ const extractMeetInfo = (cons, appt) => {
     ? 'meet_ready'
     : cons?.meeting_status || cons?.meetingStatus || cons?.status || appt?.status || 'scheduled';
   const transcript = cons?.transcript_status || cons?.transcriptStatus || 'pending';
-  return { uri, code, space, status, transcript };
+  const createdAt =
+    cons?.meeting?.createdAt ||
+    cons?.created_at ||
+    appt?.googleMeet?.createdAt ||
+    appt?.created_at ||
+    null;
+  return { uri, code, space, status, transcript, createdAt };
 };
 
 export default function GoogleMeetCard({
@@ -94,6 +100,7 @@ export default function GoogleMeetCard({
     meetingCode: initialInfo.code,
     meetingStatus: initialInfo.status,
     transcriptStatus: initialInfo.transcript,
+    createdAt: initialInfo.createdAt,
   });
 
   const [consentConfirmed, setConsentConfirmed] = useState(Boolean(consultation?.has_consent));
@@ -825,8 +832,13 @@ export default function GoogleMeetCard({
                     Meeting code: <strong className="text-secondary">{meetData.meetingCode}</strong>
                   </span>
                 )}
+                {meetData.createdAt && (
+                  <span>
+                    Created: <strong className="text-secondary">{typeof meetData.createdAt === 'string' ? meetData.createdAt.split('T')[0] : (meetData.createdAt.toDate ? meetData.createdAt.toDate().toLocaleDateString() : 'Active')}</strong>
+                  </span>
+                )}
                 <span className="flex items-center gap-1 text-muted">
-                  Opens securely in Google Meet
+                  Provider: <strong className="text-secondary">Google Meet</strong>
                 </span>
                 <button
                   type="button"
