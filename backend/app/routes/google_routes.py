@@ -165,9 +165,14 @@ def get_google_connection_status(
 ):
     """Checks if the logged-in doctor has connected their Google account. Requires authentication."""
     status_info = google_oauth_service.get_connection_status(user_id=current_user.id, db=db)
+    is_conn = bool(status_info.get("is_connected", False))
+    doc_email = status_info.get("email")
     return GoogleAuthStatusResponse(
-        is_connected=status_info["is_connected"],
-        email=status_info.get("email"),
+        connected=is_conn,
+        is_connected=is_conn,
+        googleEmail=doc_email,
+        email=doc_email,
+        status="CONNECTED" if is_conn else "GOOGLE_NOT_CONNECTED",
         scopes=status_info.get("scopes", []),
         expires_at=status_info.get("expires_at"),
         is_mock=False,

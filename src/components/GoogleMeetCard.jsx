@@ -94,6 +94,8 @@ export default function GoogleMeetCard({
   const [copiedLink, setCopiedLink] = useState(false);
   const [meetCreationError, setMeetCreationError] = useState(null);
 
+  const [apiDiagnosticError, setApiDiagnosticError] = useState(null);
+
   const initialInfo = extractMeetInfo(consultation, appointment);
   const [meetData, setMeetData] = useState({
     spaceName: initialInfo.space,
@@ -114,9 +116,6 @@ export default function GoogleMeetCard({
       const params = new URLSearchParams(window.location.search);
       const googleAuthParam = params.get('google_auth');
       const googleAuthEmail = params.get('email');
-      const meetCreatedParam = params.get('meet_created');
-      const meetingUriParam = params.get('meeting_uri');
-      const meetingCodeParam = params.get('meeting_code');
 
       if (googleAuthParam === 'success' && active) {
         success(`Google account connected${googleAuthEmail ? ` (${googleAuthEmail})` : ''}.`, 'OAuth Connected');
@@ -125,7 +124,6 @@ export default function GoogleMeetCard({
           is_connected: true,
           email: googleAuthEmail || prev.email,
         }));
-        // Clean URL params
         try {
           const url = new URL(window.location.href);
           ['google_auth', 'email', 'error_code', 'error_msg'].forEach((k) => url.searchParams.delete(k));
@@ -135,7 +133,6 @@ export default function GoogleMeetCard({
         const errCode = params.get('error_code') || '';
         const errMsg = params.get('error_msg') || 'Google authorization failed.';
         toastError(`${errCode ? `[${errCode}] ` : ''}${errMsg}`, 'OAuth Error');
-        // Clean URL params
         try {
           const url = new URL(window.location.href);
           ['google_auth', 'email', 'error_code', 'error_msg'].forEach((k) => url.searchParams.delete(k));
@@ -152,19 +149,22 @@ export default function GoogleMeetCard({
 
       try {
         const res = await getGoogleAuthStatus();
-        if (active && res) {
+        if (active && res && typeof res === 'object') {
+          setApiDiagnosticError(null);
           setAuthStatus({
-            is_connected: Boolean(res.is_connected),
-            email: res.email || null,
+            is_connected: Boolean(res.connected ?? res.is_connected),
+            email: res.googleEmail || res.email || null,
             checked: true,
           });
         }
       } catch (err) {
-        const errCode = err?.response?.data?.error || '';
+        const errDetail = err?.response?.data || {};
+        const errCode = err?.code || errDetail?.error || errDetail?.code || '';
+        const errMsg = errDetail?.message || err?.message || 'Could not verify Google status with backend.';
         if (active) {
           setAuthStatus({ is_connected: false, email: null, checked: true });
-          if (errCode === 'GOOGLE_OAUTH_NOT_CONFIGURED') {
-            // Silently set disconnected â€” server is not configured
+          if (errCode === 'BACKEND_RETURNED_HTML' || errCode === 'BACKEND_UNAVAILABLE') {
+            setApiDiagnosticError({ code: errCode, message: errMsg });
           }
         }
       }
@@ -247,7 +247,12 @@ export default function GoogleMeetCard({
         if (cancelled) return;
         try {
           if (targetConsultId) {
-            const mRes = await getConsultationMeeting(targetConsultId).catch(() => null);
+            const mRes = await getConsultationMeeting(targetConsultId).catch((err) => {
+              if (err?.code === 'BACKEND_RETURNED_HTML' || err?.code === 'BACKEND_UNAVAILABLE') {
+                cancelled = true;
+              }
+              return null;
+            });
             if (mRes?.meeting?.meetingUrl || mRes?.meetingUri || mRes?.meetingUrl) {
               const uri = mRes.meeting?.meetingUrl || mRes.meetingUri || mRes.meetingUrl;
               const code = mRes.meeting?.meetingCode || mRes.meetingCode;
@@ -447,7 +452,27 @@ export default function GoogleMeetCard({
     const targetConsultId = consultation?.id || consultation?.consultation_id || appointment?.consultation_id;
     const targetApptId = appointment?.id || consultation?.appointment_id;
     setRefreshing(true);
+    setApiDiagnosticError(null);
     try {
+      // 0. Refresh Google OAuth connection status
+      try {
+        const aRes = await getGoogleAuthStatus();
+        if (aRes && typeof aRes === 'object') {
+          setAuthStatus({
+            is_connected: Boolean(aRes.connected ?? aRes.is_connected),
+            email: aRes.googleEmail || aRes.email || null,
+            checked: true,
+          });
+        }
+      } catch (authErr) {
+        const errDetail = authErr?.response?.data || {};
+        const errCode = authErr?.code || errDetail?.error || errDetail?.code || '';
+        const errMsg = errDetail?.message || authErr?.message || 'Could not reach backend service.';
+        if (errCode === 'BACKEND_RETURNED_HTML' || errCode === 'BACKEND_UNAVAILABLE') {
+          setApiDiagnosticError({ code: errCode, message: errMsg });
+        }
+      }
+
       let foundUri = null;
       let foundCode = null;
       let foundSpace = null;
@@ -659,6 +684,22 @@ export default function GoogleMeetCard({
                 !authStatus.is_connected ? (
                   /* CASE 1: Google not connected */
                   <div className="flex flex-col items-center gap-3 w-full animate-fade-in">
+                    {apiDiagnosticError && (
+                      <div className="w-full p-3 rounded-lg border border-red-500/30 bg-red-950/20 text-xs text-left mb-1">
+                        <div className="flex items-center justify-between text-red-400 font-semibold mb-1">
+                          <span>[{apiDiagnosticError.code}] Backend Server Notice</span>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-xs text-xs text-primary hover:underline p-0 h-auto"
+                            onClick={handleRefreshStatus}
+                            disabled={refreshing}
+                          >
+                            Retry
+                          </button>
+                        </div>
+                        <p className="text-muted leading-relaxed">{apiDiagnosticError.message}</p>
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 text-sm text-amber-500 font-semibold">
                       <span className="status-dot" style={{ background: '#f59e0b' }} />
                       <span>Google account required</span>

@@ -159,7 +159,7 @@ from fastapi.responses import FileResponse, JSONResponse
 @app.get("/health", tags=["Health"])
 @app.get("/api/health", tags=["Health"])
 async def health_check():
-    return {"status": "ok", "service": "MediBridge AI"}
+    return {"status": "ok", "service": "kenko-ai-api"}
 
 
 # ── Frontend Static Assets & SPA Fallback ─────────────────────

@@ -1,15 +1,21 @@
 import axios from 'axios';
 
-const getApiBaseUrl = () => {
-  const envUrl = import.meta.env.VITE_API_URL;
+export const getApiBaseUrl = () => {
+  const envUrl =
+    import.meta.env.VITE_API_BASE_URL ||
+    import.meta.env.VITE_API_URL ||
+    import.meta.env.VITE_BACKEND_URL;
+
   if (typeof window !== 'undefined' && window.location) {
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const isLocal =
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1';
     if (!isLocal) {
-      if (envUrl && envUrl.startsWith('https://')) return envUrl;
+      if (envUrl && envUrl.startsWith('https://')) return envUrl.replace(/\/+$/, '');
       return window.location.origin;
     }
   }
-  return envUrl || 'http://localhost:8000';
+  return (envUrl || 'http://localhost:8000').replace(/\/+$/, '');
 };
 
 // ─── Axios Instance ──────────────────────────────────────────
@@ -17,13 +23,19 @@ const api = axios.create({
   baseURL: getApiBaseUrl(),
   headers: {
     'Content-Type': 'application/json',
+    Accept: 'application/json',
   },
   timeout: 45000,
 });
 
-// ─── Request Interceptor — Attach JWT Bearer Token ──────────
+// ─── Request Interceptor — Logging & JWT Bearer Token ────────
 api.interceptors.request.use(
   (config) => {
+    const fullUrl = `${config.baseURL || ''}${config.url || ''}`;
+    if (import.meta.env.DEV) {
+      console.log(`[API REQUEST] ${config.method?.toUpperCase()} ${fullUrl}`);
+    }
+
     const token = localStorage.getItem('medibridge_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -36,22 +48,54 @@ api.interceptors.request.use(
 // ─── Response Interceptor — Guard against HTML responses from API endpoints ──
 api.interceptors.response.use(
   (response) => {
-    if (
-      typeof response.data === 'string' &&
-      (response.data.trim().startsWith('<!doctype html>') ||
-        response.data.trim().startsWith('<!DOCTYPE html>') ||
-        response.data.trim().startsWith('<html') ||
-        response.data.includes('<div id="root">'))
-    ) {
-      const err = new Error(
-        'Backend API returned HTML instead of JSON. Ensure the FastAPI backend server is running and deployed.'
-      );
-      err.isHtmlResponse = true;
+    const contentType =
+      response.headers?.['content-type'] ||
+      (typeof response.headers?.get === 'function' ? response.headers.get('content-type') : '') ||
+      '';
+
+    const isHtml =
+      contentType.includes('text/html') ||
+      (typeof response.data === 'string' &&
+        (response.data.trim().startsWith('<!doctype html>') ||
+          response.data.trim().startsWith('<!DOCTYPE html>') ||
+          response.data.trim().startsWith('<html') ||
+          response.data.includes('<div id="root">')));
+
+    if (isHtml) {
+      const fullUrl = `${response.config?.baseURL || ''}${response.config?.url || ''}`;
+      if (import.meta.env.DEV) {
+        console.error(`[API ERROR] ${response.config?.method?.toUpperCase()} ${fullUrl} returned text/html (200 OK) instead of application/json`);
+      }
+      const err = new Error('The configured API endpoint returned HTML instead of JSON.');
+      err.code = 'BACKEND_RETURNED_HTML';
+      err.status = response.status;
+      err.response = {
+        status: response.status,
+        data: {
+          code: 'BACKEND_RETURNED_HTML',
+          error: 'BACKEND_RETURNED_HTML',
+          message: 'The configured API endpoint returned HTML instead of JSON. Ensure the FastAPI backend server is running and deployed.',
+          status: response.status,
+        },
+      };
       return Promise.reject(err);
     }
     return response;
   },
-  (error) => Promise.reject(error)
+  (error) => {
+    if (!error.response && error.message?.includes('Network Error')) {
+      error.code = 'BACKEND_UNAVAILABLE';
+      error.response = {
+        status: 503,
+        data: {
+          code: 'BACKEND_UNAVAILABLE',
+          error: 'BACKEND_UNAVAILABLE',
+          message: 'FastAPI backend server is unavailable or offline. Please check deployment.',
+        },
+      };
+    }
+    return Promise.reject(error);
+  }
 );
 
 // ─── Auth API ─────────────────────────────────────────────────
