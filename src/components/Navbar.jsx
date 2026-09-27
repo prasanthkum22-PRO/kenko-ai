@@ -16,6 +16,9 @@ import {
   IconMoon,
   IconChevronDown,
   IconLogout,
+  IconStethoscope,
+  IconClock,
+  IconShield,
 } from './icons';
 
 /**
@@ -134,6 +137,30 @@ export default function Navbar({ onMenuToggle, sidebarOpen }) {
                   <Link to="/prescriptions" className="dropdown-item" onClick={() => setProfileOpen(false)}>
                     <IconRx size={17} />
                     Prescription Studio
+                  </Link>
+                )}
+                {user?.role === 'admin' && (
+                  <Link to="/admin/control-center" className="dropdown-item" onClick={() => setProfileOpen(false)}>
+                    <IconShield size={17} />
+                    Admin Control Center
+                  </Link>
+                )}
+                {(user?.role === 'patient' || !user?.role) && (
+                  <>
+                    <Link to="/apply-doctor" className="dropdown-item" onClick={() => setProfileOpen(false)}>
+                      <IconStethoscope size={17} />
+                      Apply as Doctor
+                    </Link>
+                    <Link to="/apply-doctor/status" className="dropdown-item" onClick={() => setProfileOpen(false)}>
+                      <IconClock size={17} />
+                      Application Status
+                    </Link>
+                  </>
+                )}
+                {user?.role === 'doctor_pending' && (
+                  <Link to="/apply-doctor/status" className="dropdown-item" onClick={() => setProfileOpen(false)}>
+                    <IconClock size={17} />
+                    Doctor Application Status
                   </Link>
                 )}
                 <div className="dropdown-divider" />

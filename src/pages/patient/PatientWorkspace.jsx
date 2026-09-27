@@ -12,6 +12,8 @@ import {
   IconCalendar,
   IconSend,
   IconUser,
+  IconStethoscope,
+  IconClock,
 } from '../../components/icons';
 
 export default function PatientWorkspace() {
@@ -124,7 +126,20 @@ export default function PatientWorkspace() {
             Your clinical records, prescriptions, diagnostic reports and upcoming telehealth appointments.
           </p>
         </div>
-        <div className="page-actions">
+        <div className="page-actions flex items-center gap-2">
+          {user?.role === 'doctor_pending' ? (
+            <button className="btn btn-secondary text-xs" onClick={() => navigate('/apply-doctor/status')}>
+              <IconClock size={16} /> Application Status
+            </button>
+          ) : user?.role === 'doctor' ? (
+            <button className="btn btn-secondary text-xs" onClick={() => navigate('/doctor')}>
+              <IconStethoscope size={16} /> Doctor Workspace
+            </button>
+          ) : (
+            <button className="btn btn-secondary text-xs" onClick={() => navigate('/apply-doctor')}>
+              <IconStethoscope size={16} /> Apply as Doctor
+            </button>
+          )}
           <button className="btn btn-primary" onClick={() => navigate('/consultations/video')}>
             <IconVideo size={16} /> Join Telehealth Room
           </button>

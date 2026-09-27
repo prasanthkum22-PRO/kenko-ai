@@ -21,6 +21,8 @@ import {
   IconCalendar,
   IconShield,
   IconArrowRight,
+  IconStethoscope,
+  IconBadgeCheck,
 } from '../../components/icons';
 
 export default function PatientDashboardPage() {
@@ -322,6 +324,217 @@ export default function PatientDashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* ─── Doctor Network / Application Status Banner ───────── */}
+      {user?.role === 'doctor_pending' ? (
+        <div
+          className="glass-card-flat"
+          style={{
+            padding: '1.25rem 1.5rem',
+            marginBottom: '2rem',
+            borderRadius: '16px',
+            border: '1px solid rgba(245, 158, 11, 0.3)',
+            background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(217, 119, 6, 0.12) 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: '12px',
+                background: 'rgba(245, 158, 11, 0.2)',
+                color: '#f59e0b',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <IconClock style={{ width: 22, height: 22 }} />
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#fbbf24' }}>
+                  Doctor Application Under Review
+                </h3>
+                <span
+                  style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: 9999,
+                    background: 'rgba(245, 158, 11, 0.2)',
+                    color: '#f59e0b',
+                    border: '1px solid rgba(245, 158, 11, 0.4)',
+                  }}
+                >
+                  PENDING REVIEW
+                </span>
+              </div>
+              <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: 'var(--color-text-secondary, #94a3b8)' }}>
+                Your medical credentials have been submitted to the Admin Control Center for clinical verification.
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/apply-doctor/status"
+            className="btn btn-secondary"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: '0.85rem',
+              fontWeight: 600,
+              borderColor: 'rgba(245, 158, 11, 0.4)',
+              color: '#fbbf24',
+              textDecoration: 'none',
+            }}
+          >
+            Check Status Details
+            <IconArrowRight style={{ width: 14, height: 14 }} />
+          </Link>
+        </div>
+      ) : user?.role === 'doctor' ? (
+        <div
+          className="glass-card-flat"
+          style={{
+            padding: '1.25rem 1.5rem',
+            marginBottom: '2rem',
+            borderRadius: '16px',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(5, 150, 105, 0.12) 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: '12px',
+                background: 'rgba(16, 185, 129, 0.2)',
+                color: '#10b981',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <IconBadgeCheck style={{ width: 22, height: 22 }} />
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#34d399' }}>
+                  Verified Doctor Account Active
+                </h3>
+                <span
+                  style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: 9999,
+                    background: 'rgba(16, 185, 129, 0.2)',
+                    color: '#10b981',
+                    border: '1px solid rgba(16, 185, 129, 0.4)',
+                  }}
+                >
+                  VERIFIED
+                </span>
+              </div>
+              <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: 'var(--color-text-secondary, #94a3b8)' }}>
+                You have verified clinician privileges. Access your consultations, patients, and e-prescriptions.
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/doctor"
+            className="btn btn-primary"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: '0.85rem',
+              fontWeight: 600,
+              background: '#10b981',
+              borderColor: '#10b981',
+              color: '#ffffff',
+              textDecoration: 'none',
+            }}
+          >
+            Go to Doctor Workspace
+            <IconArrowRight style={{ width: 14, height: 14 }} />
+          </Link>
+        </div>
+      ) : (
+        <div
+          className="glass-card-flat"
+          style={{
+            padding: '1.25rem 1.5rem',
+            marginBottom: '2rem',
+            borderRadius: '16px',
+            border: '1px solid rgba(37, 99, 235, 0.25)',
+            background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.08) 0%, rgba(96, 165, 250, 0.08) 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: '12px',
+                background: 'rgba(37, 99, 235, 0.15)',
+                color: 'var(--color-primary, #3b82f6)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <IconStethoscope style={{ width: 22, height: 22 }} />
+            </div>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--color-text-primary, #ffffff)' }}>
+                Are you a Medical Doctor or Healthcare Specialist?
+              </h3>
+              <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: 'var(--color-text-secondary, #94a3b8)' }}>
+                Apply to become a verified Kenko AI physician to host video consultations, issue smart prescriptions, and manage care plans.
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <Link
+              to="/apply-doctor"
+              className="btn btn-primary"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                textDecoration: 'none',
+              }}
+            >
+              Apply as Doctor
+              <IconArrowRight style={{ width: 14, height: 14 }} />
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* ─── 4 Primary Cards Grid ───────────────────────────────── */}
       <div

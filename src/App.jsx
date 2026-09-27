@@ -227,6 +227,22 @@ export default function App() {
 
                       {/* Admin Moderation & Control Center */}
                       <Route
+                        path="/admin/control-center"
+                        element={
+                          <RoleGuard allowedRoles={['admin']}>
+                            <AdminControlCenter initialTab="overview" />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/admin/moderation"
+                        element={
+                          <RoleGuard allowedRoles={['admin']}>
+                            <AdminControlCenter initialTab="overview" />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
                         path="/admin/doctors/applications"
                         element={
                           <RoleGuard allowedRoles={['admin']}>
@@ -239,6 +255,14 @@ export default function App() {
                         element={
                           <RoleGuard allowedRoles={['admin']}>
                             <AdminControlCenter initialTab="posts" />
+                          </RoleGuard>
+                        }
+                      />
+                      <Route
+                        path="/admin/users"
+                        element={
+                          <RoleGuard allowedRoles={['admin']}>
+                            <AdminControlCenter initialTab="users" />
                           </RoleGuard>
                         }
                       />
