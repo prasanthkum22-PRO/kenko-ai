@@ -20,7 +20,7 @@ from app.models.schemas import (
     GoogleMeetStatusResponse,
     NormalizedTranscriptResponse,
 )
-from app.utils.auth import get_current_user
+from app.utils.auth import get_current_user, require_authenticated_user
 from app.services.google_meet_service import google_meet_service
 from app.services.transcript_service import transcript_service
 from app.services.firebase_service import firebase_service
@@ -58,13 +58,14 @@ def format_error_response(
 @router.post("/create", response_model=CreateGoogleMeetResponse, summary="Create a new Google Meet space for consultation")
 async def create_google_meet(
     req: CreateGoogleMeetRequest,
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db),
 ):
     """
     Creates a new Google Meet space using Google Meet REST API v2.
-    Idempotent: if google_meeting_uri is already set, returns the existing one.
-    Authorization: doctor assigned to the consultation, or admin.
+    Idempotent: if google_meeting_uri is already set (and not failed), returns the existing one.
+    Authorization: doctor assigned to the consultation.
+    Requires authentication — no default_doctor fallback.
     """
     request_id = f"req_{uuid.uuid4().hex[:10]}"
     consultation_id = req.consultationId or req.consultation_id
@@ -110,7 +111,7 @@ async def create_google_meet(
         if not consultation.doctor_id:
             consultation.doctor_id = current_user.doctor_id or uid
 
-    user_id = current_user.id if current_user else "default_doctor"
+    user_id = current_user.id
 
     # ── Idempotency: return existing meeting if already created ──────────────
     if consultation.google_meeting_uri and consultation.meeting_status not in (
@@ -188,7 +189,18 @@ async def create_google_meet(
                 doctor_id=user_id,
             )
         except Exception as fe:
-            logger.error(f"[GoogleMeet] requestId={request_id} error=FIREBASE_SYNC_FAILED detail={fe}")
+            logger.error(f"[GoogleMeet] requestId={request_id} consultationId={consultation_id} error=FIREBASE_SYNC_FAILED detail={fe}")
+            # Firebase sync failure is a REAL error — update status and surface it
+            consultation.meeting_status = "firebase_sync_failed"
+            db.commit()
+            return format_error_response(
+                code="FIREBASE_SYNC_FAILED",
+                message="Google Meet was created but Firestore synchronization failed. Please retry.",
+                operation="firestore.write",
+                request_id=request_id,
+                retryable=True,
+                status_code=500,
+            )
 
         audit = AuditLog(
             user_id=user_id,
@@ -217,6 +229,13 @@ async def create_google_meet(
         consultation.updated_at = datetime.now(timezone.utc)
         db.commit()
 
+        if "GOOGLE_TOKEN_REFRESH_FAILED" in err_str:
+            return format_error_response(
+                code="GOOGLE_TOKEN_REFRESH_FAILED",
+                message="Google OAuth token refresh failed. Doctor must reconnect Google account.",
+                request_id=request_id,
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
         if "GOOGLE_AUTH_REQUIRED" in err_str:
             return format_error_response(
                 code="GOOGLE_AUTH_REQUIRED",
@@ -451,7 +470,9 @@ async def sync_google_meet_transcript(
     if not consultation:
         raise HTTPException(status_code=404, detail="Consultation not found.")
 
-    user_id = current_user.id if current_user else (consultation.google_oauth_user_id or "default_doctor")
+    user_id = current_user.id if current_user else (consultation.google_oauth_user_id or "")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required for transcript sync.")
 
     try:
         result = await transcript_service.sync_consultation_transcript(

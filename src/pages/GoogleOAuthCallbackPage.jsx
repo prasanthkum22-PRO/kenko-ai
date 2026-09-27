@@ -2,9 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { useToast } from '../context/ToastContext';
-import { acceptAppointmentFirestore, updateAppointmentFirestore } from '../services/firestoreService';
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase/config';
 import { IconGoogleMeet, IconCheck, IconAlert } from '../components/icons';
 
 const getApiBaseUrl = () => {
@@ -25,7 +22,7 @@ export default function GoogleOAuthCallbackPage() {
   const { success, error: toastError, info } = useToast();
 
   const [status, setStatus] = useState('processing'); // 'processing' | 'success' | 'error'
-  const [statusMessage, setStatusMessage] = useState('Authorizing Google Meet and creating consultation room...');
+  const [statusMessage, setStatusMessage] = useState('Connecting your Google account...');
 
   useEffect(() => {
     let active = true;
@@ -53,9 +50,8 @@ export default function GoogleOAuthCallbackPage() {
       if (googleAuthParam === 'success') {
         if (!active) return;
         setStatus('success');
-        setStatusMessage('Google Meet connected successfully.');
-        success('Google Meet connected successfully.', 'Meeting Ready');
-        const meetingUri = searchParams.get('meeting_uri');
+        setStatusMessage('Google account connected successfully.');
+        success('Google connected. You can now create Google Meet spaces.', 'Google Connected');
         const defaultTarget = '/consultations';
         setTimeout(() => {
           navigate(defaultTarget, { replace: true });
@@ -89,63 +85,31 @@ export default function GoogleOAuthCallbackPage() {
         if (!active) return;
 
         const data = res.data || {};
-        const meetingUri = data.meetingUri;
-        const meetingCode = data.meetingCode;
-        const spaceName = data.spaceName;
         const consultationId = data.consultation_id;
-        const appointmentId = data.appointment_id || consultationId;
-        const targetUrl = data.return_url || (consultationId ? `/consultations/video?id=${consultationId}` : '/consultations');
-
-        // Save/Sync to Firestore immediately
-        if (appointmentId && meetingUri) {
-          try {
-            await acceptAppointmentFirestore(appointmentId, meetingUri, meetingCode, spaceName);
-          } catch (fe) {
-            console.debug('Firestore appointment sync note:', fe);
-          }
-        }
-
-        if (consultationId && meetingUri) {
-          try {
-            const consultRef = doc(db, 'consultations', consultationId);
-            await updateDoc(consultRef, {
-              googleSpaceName: spaceName || '',
-              googleMeetingUri: meetingUri,
-              googleMeetingCode: meetingCode || '',
-              meetingStatus: 'meet_ready',
-              status: 'IN_PROGRESS',
-              meeting: {
-                provider: 'google_meet',
-                meetingUrl: meetingUri,
-                spaceName: spaceName || '',
-                meetingCode: meetingCode || '',
-                createdAt: serverTimestamp(),
-                status: 'READY',
-              },
-              updatedAt: serverTimestamp(),
-            });
-          } catch (fe) {
-            console.debug('Firestore consultation sync note:', fe);
-          }
-        }
+        const appointmentId = data.appointment_id;
+        // Note: No meetingUri here — Meet is only created by explicit "Create Meeting" action by doctor
+        const targetUrl = data.return_url
+          || (consultationId ? `/consultations/video?id=${consultationId}` : '/consultations');
 
         setStatus('success');
-        setStatusMessage('Google Meet Space created and ready!');
-        success('Google Meet consultation space is ready.', 'Consultation Ready');
+        setStatusMessage('Google account connected. You can now create a Google Meet room.');
+        success('Google connected successfully. Click Create Meeting to start the consultation.', 'Google Connected');
 
         setTimeout(() => {
           navigate(targetUrl, { replace: true });
-        }, 1200);
+        }, 1800);
       } catch (err) {
         if (!active) return;
         console.error('OAuth Callback exchange error:', err);
-        const errMsg = err?.response?.data?.detail || err?.message || 'Could not complete token exchange.';
+        const errData = err?.response?.data;
+        const errCode = errData?.error || '';
+        const errMsg = errData?.message || errData?.detail || err?.message || 'Could not complete Google authorization.';
         setStatus('error');
-        setStatusMessage(`Error: ${errMsg}`);
+        setStatusMessage(errCode ? `[${errCode}] ${errMsg}` : errMsg);
         toastError(errMsg, 'OAuth Error');
         setTimeout(() => {
           navigate('/consultations', { replace: true });
-        }, 3000);
+        }, 4000);
       }
     }
 
@@ -190,7 +154,7 @@ export default function GoogleOAuthCallbackPage() {
               {statusMessage}
             </p>
             <p className="text-xs text-muted">
-              Exchanging secure credentials and setting up the consultation space...
+              Exchanging authorization code with Google...
             </p>
           </div>
         )}
@@ -211,9 +175,9 @@ export default function GoogleOAuthCallbackPage() {
             >
               <IconCheck size={28} />
             </div>
-            <div className="font-bold text-lg text-primary">Meeting Space Ready</div>
+            <div className="font-bold text-lg text-primary">Google Account Connected</div>
             <p className="text-sm text-secondary">{statusMessage}</p>
-            <p className="text-xs text-muted">Redirecting you back to your consultation workspace...</p>
+            <p className="text-xs text-muted">Redirecting you back to your consultation...</p>
           </div>
         )}
 

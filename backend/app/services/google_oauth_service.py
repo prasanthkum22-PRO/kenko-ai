@@ -61,10 +61,7 @@ class GoogleOAuthService:
         """Checks whether real Google Cloud OAuth credentials have been provided."""
         return bool(self.client_id and self.client_secret)
 
-    @property
-    def is_mock_mode(self) -> bool:
-        """Explicit mock mode flag. Default: false."""
-        return os.getenv("GOOGLE_MEET_MOCK_MODE", "false").lower() == "true"
+    # is_mock_mode removed — production only, no mock mode supported
 
     def get_redirect_uri_for_request(self, return_url: Optional[str] = None) -> str:
         """Determines the appropriate redirect_uri based on the originating request."""
@@ -148,9 +145,11 @@ class GoogleOAuthService:
     async def exchange_code(self, code: str, state: str, db: Session) -> Dict[str, Any]:
         """
         Exchanges authorization code for access_token and refresh_token.
-        Saves tokens securely in the database and returns user, consultation, and appointment context.
+        Saves tokens keyed to the specific user_id from state.
+        Returns context for callback redirection — does NOT create a Meet space.
+        SECURITY: user_id must come from the validated state — no default fallback.
         """
-        user_id = "default_doctor"
+        user_id = None
         return_url = None
         consultation_id = None
         appointment_id = None
@@ -173,7 +172,7 @@ class GoogleOAuthService:
                 curr = unquoted
 
             if isinstance(parsed_dict, dict):
-                user_id = parsed_dict.get("uid") or parsed_dict.get("user_id") or "default_doctor"
+                user_id = parsed_dict.get("uid") or parsed_dict.get("user_id")
                 return_url = parsed_dict.get("return_url")
                 consultation_id = parsed_dict.get("consultation_id") or parsed_dict.get("consultId") or parsed_dict.get("id")
                 appointment_id = parsed_dict.get("appointment_id") or parsed_dict.get("apptId")
@@ -211,9 +210,12 @@ class GoogleOAuthService:
             except Exception:
                 pass
 
+        if not user_id:
+            logger.error("[OAuth Callback] SECURITY: No valid user_id in OAuth state — rejecting.")
+            raise ValueError("GOOGLE_OAUTH_STATE_INVALID: OAuth state missing user identity. Cannot store token.")
+
         logger.info(
-            f"[OAuth Callback] Authorization code received (code_len={len(code)}). "
-            f"user={user_id}, consult={consultation_id}, appt={appointment_id}, return_url={return_url}"
+            f"[OAuth Callback] Code exchange: user={user_id}, consult={consultation_id}, appt={appointment_id}"
         )
 
         if not self.is_configured:
@@ -277,22 +279,23 @@ class GoogleOAuthService:
                 "return_url": return_url,
                 "consultation_id": consultation_id,
                 "appointment_id": appointment_id,
-                "is_mock": False,
+                # No meetingUri — Meet creation is only done via POST /api/meet/create
             }
 
     async def get_valid_access_token(self, user_id: str, db: Session) -> Optional[str]:
         """
-        Retrieves a valid access token for the given user.
-        Refreshes the token automatically if it is close to expiry.
+        Retrieves a valid access token for the given user_id ONLY.
+        Does NOT fall back to any other user's token.
+        Raises RuntimeError if token refresh fails.
         """
+        if not user_id:
+            return None
+
+        # Strict: only this doctor's token — no fallback to any other user
         token_rec = db.query(GoogleOAuthToken).filter(
             GoogleOAuthToken.user_id == user_id,
             GoogleOAuthToken.is_valid == True,
         ).first()
-
-        # Fallback to any active token in DB if specific user_id not found (e.g. single doctor system)
-        if not token_rec:
-            token_rec = db.query(GoogleOAuthToken).filter(GoogleOAuthToken.is_valid == True).first()
 
         if not token_rec or not token_rec.access_token:
             return None
@@ -304,10 +307,10 @@ class GoogleOAuthService:
 
         # Token is expired or about to expire; refresh it
         if not token_rec.refresh_token:
-            logger.warning("No refresh token stored for Google OAuth user.")
+            logger.error(f"[OAuth] No refresh_token for user_id={user_id}. Must reconnect.")
             token_rec.is_valid = False
             db.commit()
-            return None
+            raise RuntimeError(f"GOOGLE_TOKEN_REFRESH_FAILED: No refresh token stored for user {user_id}. Doctor must reconnect Google.")
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -332,23 +335,29 @@ class GoogleOAuthService:
                     db.commit()
                     return token_rec.access_token
                 else:
-                    logger.error(f"Google token refresh failed: {resp.status_code} - {resp.text}")
+                    logger.error(f"[OAuth] Token refresh HTTP {resp.status_code} for user_id={user_id}")
                     token_rec.is_valid = False
                     db.commit()
-                    return None
+                    raise RuntimeError(
+                        f"GOOGLE_TOKEN_REFRESH_FAILED: Google returned HTTP {resp.status_code}. "
+                        f"Doctor must reconnect Google account."
+                    )
+        except RuntimeError:
+            raise
         except Exception as exc:
-            logger.error(f"Error refreshing Google OAuth token: {exc}")
-            return None
+            logger.error(f"[OAuth] Refresh network error for user_id={user_id}: {exc}")
+            raise RuntimeError(f"GOOGLE_TOKEN_REFRESH_FAILED: Network error during token refresh: {exc}")
 
     def get_connection_status(self, user_id: str, db: Session) -> Dict[str, Any]:
-        """Returns the current user's Google Meet OAuth connection status."""
+        """Returns the current user's Google OAuth connection status. Strictly per-user only."""
+        if not user_id:
+            return {"connected": False, "is_connected": False, "googleEmail": None, "email": None,
+                    "status": "AUTHENTICATION_REQUIRED", "scopes": [], "expires_at": None}
+
         token_rec = db.query(GoogleOAuthToken).filter(
             GoogleOAuthToken.user_id == user_id,
             GoogleOAuthToken.is_valid == True,
         ).first()
-
-        if not token_rec:
-            token_rec = db.query(GoogleOAuthToken).filter(GoogleOAuthToken.is_valid == True).first()
 
         if not token_rec or not token_rec.is_valid:
             return {
@@ -359,7 +368,6 @@ class GoogleOAuthService:
                 "status": "GOOGLE_NOT_CONNECTED",
                 "scopes": [],
                 "expires_at": None,
-                "is_mock": self.is_mock_mode,
             }
 
         return {
@@ -370,67 +378,31 @@ class GoogleOAuthService:
             "status": "GOOGLE_CONNECTED",
             "scopes": (token_rec.scopes or "").split(" ") if token_rec.scopes else REQUIRED_SCOPES,
             "expires_at": token_rec.expires_at.isoformat() if token_rec.expires_at else None,
-            "is_mock": token_rec.access_token.startswith("mock_") if token_rec.access_token else False,
         }
 
-    def update_google_email(self, user_id: str, email: str, db: Session) -> Dict[str, Any]:
-        """
-        Updates the doctor's Google Account email specifically for Google Meet.
-        """
-        token_rec = db.query(GoogleOAuthToken).filter(
-            GoogleOAuthToken.user_id == user_id,
-        ).first()
-
-        if not token_rec:
-            token_rec = db.query(GoogleOAuthToken).first()
-
-        clean_email = email.strip() if email else ""
-        if token_rec:
-            token_rec.email = clean_email
-            token_rec.is_valid = True
-            token_rec.updated_at = datetime.now(timezone.utc)
-            db.commit()
-            db.refresh(token_rec)
-        else:
-            token_rec = self._save_or_update_token(
-                db=db,
-                user_id=user_id,
-                email=clean_email,
-                access_token="custom_meet_token_" + secrets.token_hex(16),
-                refresh_token="custom_meet_refresh_" + secrets.token_hex(16),
-                expires_in=86400 * 30,
-                scopes=" ".join(REQUIRED_SCOPES),
-            )
-
-        return {
-            "success": True,
-            "email": token_rec.email,
-            "is_connected": True,
-            "message": f"Google Meet account updated to {token_rec.email}",
-        }
+    # update_google_email removed: creating fake tokens is not allowed in production.
+    # Doctors must connect via real OAuth flow (GET /api/google/auth).
 
     async def disconnect(self, user_id: str, db: Session) -> bool:
-        """Revokes token and removes stored credentials."""
+        """Revokes token with Google and deletes stored credentials for this user only."""
+        if not user_id:
+            return False
         token_rec = db.query(GoogleOAuthToken).filter(
             GoogleOAuthToken.user_id == user_id
         ).first()
-        if not token_rec:
-            token_rec = db.query(GoogleOAuthToken).first()
-
         if token_rec:
-            # Best effort revoke with Google
-            if not token_rec.access_token.startswith("mock_"):
-                try:
-                    async with httpx.AsyncClient(timeout=10.0) as client:
-                        await client.post(
-                            GOOGLE_REVOKE_ENDPOINT,
-                            params={"token": token_rec.access_token},
-                        )
-                except Exception as e:
-                    logger.warning(f"Google revoke call note: {e}")
-
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.post(
+                        GOOGLE_REVOKE_ENDPOINT,
+                        params={"token": token_rec.access_token},
+                    )
+                logger.info(f"[OAuth] Revoked Google token for user_id={user_id}")
+            except Exception as e:
+                logger.warning(f"[OAuth] Google revoke non-critical error: {e}")
             db.delete(token_rec)
             db.commit()
+            logger.info(f"[OAuth] Deleted token record for user_id={user_id}")
             return True
         return False
 
@@ -473,30 +445,7 @@ class GoogleOAuthService:
             )
             db.add(token_rec)
 
-        # Also update the fallback record if user_id is specific, or default_doctor if user_id is default
-        if user_id != "default_doctor":
-            default_rec = db.query(GoogleOAuthToken).filter(GoogleOAuthToken.user_id == "default_doctor").first()
-            if default_rec:
-                default_rec.access_token = access_token
-                if refresh_token:
-                    default_rec.refresh_token = refresh_token
-                if email:
-                    default_rec.email = email
-                default_rec.expires_at = expires_at
-                default_rec.scopes = scopes
-                default_rec.is_valid = True
-                default_rec.updated_at = datetime.now(timezone.utc)
-            else:
-                db.add(GoogleOAuthToken(
-                    user_id="default_doctor",
-                    email=email,
-                    access_token=access_token,
-                    refresh_token=refresh_token,
-                    token_type="Bearer",
-                    expires_at=expires_at,
-                    scopes=scopes,
-                    is_valid=True,
-                ))
+        # Token is strictly per user_id — no mirroring to default_doctor or any other record
 
         db.commit()
         db.refresh(token_rec)

@@ -275,7 +275,9 @@ async def create_consultation_google_meet(
     if not c:
         c = db.query(Consultation).filter(Consultation.appointment_id == id).first()
     if not c:
-        user_id = current_user.id if current_user else "default_doctor"
+        user_id = current_user.id
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Authentication required to create Google Meet.")
         c = Consultation(
             id=id,
             appointment_id=id,
@@ -301,7 +303,9 @@ async def create_consultation_google_meet(
             "message": "Google Meet Space already exists.",
         }
 
-    user_id = current_user.id if current_user else (c.doctor_id or "default_doctor")
+    user_id = current_user.id if current_user else (c.doctor_id or "")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required for transcript sync.")
     space_data = await google_meet_service.create_space(user_id=user_id, db=db)
     space_name = space_data.get("name")
     meeting_uri = space_data.get("meetingUri")

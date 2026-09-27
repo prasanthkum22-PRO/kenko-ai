@@ -512,7 +512,7 @@ async def create_appointment_meet(
                 consultation_id=appointment.consultation_id,
             )
         except Exception as fe:
-            logger.debug(f"Firestore idempotency sync note: {fe}")
+            logger.error(f"[Firestore] Idempotency sync failed for appt={appointment_id}: {fe}")
 
         return {
             "success": True,
@@ -560,22 +560,6 @@ async def create_appointment_meet(
     space_name = space_data.get("name")
     meeting_uri = space_data.get("meetingUri")
     meeting_code = space_data.get("meetingCode")
-    is_mock = space_data.get("isMock", False)
-
-    # If the service returned isMock=True but we need a real meeting,
-    # mark FAILED and do NOT accept a fake URI
-    if is_mock and not _is_mock_acceptable():
-        appointment.meet_status = "FAILED"
-        appointment.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={
-                "success": False,
-                "error": "GOOGLE_NOT_CONFIGURED",
-                "message": "Google Meet is not configured. Please connect a Google account with Meet API access.",
-            },
-        )
 
     if not meeting_uri:
         appointment.meet_status = "FAILED"
@@ -658,7 +642,7 @@ async def create_appointment_meet(
             consultation_id=consultation.id if consultation else None,
         )
     except Exception as fe:
-        logger.debug(f"Firestore new space sync note: {fe}")
+        logger.error(f"[Firestore] New space sync failed for appt={appointment_id}: {fe}")
 
     # ── Audit log ────────────────────────────────────────────────────────────
     audit = AuditLog(
@@ -671,8 +655,6 @@ async def create_appointment_meet(
             "appointment_id": appointment_id,
             "consultation_id": consultation.id if consultation else None,
             "space_name": space_name,
-            # Never log meeting_uri (contains code) in sensitive logs
-            "is_mock": is_mock,
         },
     )
     db.add(audit)
@@ -693,8 +675,7 @@ async def create_appointment_meet(
         "meetingUri": meeting_uri,
         "meetingCode": meeting_code,
         "meetStatus": "READY",
-        "isMock": is_mock,
-        "message": "Google Meet Space created successfully." if not is_mock else "Google Meet Space created (sandbox mode).",
+        "message": "Google Meet Space created successfully.",
     }
 
 
@@ -725,11 +706,4 @@ def get_appointment_meet_status(
     }
 
 
-def _is_mock_acceptable() -> bool:
-    """
-    In development/demo environments, a mock Meet is acceptable.
-    In production (APP_ENV=production), we reject fake URIs.
-    """
-    import os
-    env = os.getenv("APP_ENV", "development").lower()
-    return env not in ("production", "prod")
+# _is_mock_acceptable removed: production always requires real Google Meet API.

@@ -48,16 +48,27 @@ class FirebaseService:
         return {k: self._format_firestore_value(v) for k, v in data.items()}
 
     async def write_document(self, collection_path: str, doc_id: str, data: Dict[str, Any]) -> bool:
-        """Write a document to Firestore via REST."""
+        """Write a document to Firestore via REST. Raises exception on failure."""
         url = f"{self.base_url}/{collection_path}/{doc_id}"
         fields = self._dict_to_firestore_fields(data)
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 res = await client.patch(url, json={"fields": fields})
-                return res.status_code in [200, 201]
+                if res.status_code not in [200, 201]:
+                    logger.error(
+                        f"[Firestore] Write failed {collection_path}/{doc_id}: "
+                        f"HTTP {res.status_code} — {res.text[:200]}"
+                    )
+                    raise RuntimeError(
+                        f"FIREBASE_SYNC_FAILED: Firestore write to {collection_path}/{doc_id} "
+                        f"returned HTTP {res.status_code}"
+                    )
+                return True
+        except RuntimeError:
+            raise
         except Exception as e:
-            logger.debug(f"Firestore write note ({collection_path}/{doc_id}): {e}")
-            return False
+            logger.error(f"[Firestore] Write error {collection_path}/{doc_id}: {e}")
+            raise RuntimeError(f"FIREBASE_SYNC_FAILED: Network error writing to Firestore: {e}")
 
     async def write_subcollection_document(
         self, parent_collection: str, parent_id: str, subcollection: str, doc_id: str, data: Dict[str, Any]

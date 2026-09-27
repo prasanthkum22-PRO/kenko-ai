@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   getGoogleAuthStatus,
   getGoogleAuthUrl,
-  updateGoogleAccount,
   disconnectGoogleAuth,
   createGoogleMeet,
   createAppointmentMeet,
@@ -88,7 +87,7 @@ export default function GoogleMeetCard({
   const { user } = useAuth();
   const { success, error: toastError, info } = useToast();
 
-  const [authStatus, setAuthStatus] = useState({ is_connected: false, email: null, is_mock: false, checked: false });
+  const [authStatus, setAuthStatus] = useState({ is_connected: false, email: null, checked: false });
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -107,9 +106,6 @@ export default function GoogleMeetCard({
 
   const [consentConfirmed, setConsentConfirmed] = useState(Boolean(consultation?.has_consent));
   const [consentModalOpen, setConsentModalOpen] = useState(false);
-  const [isEditingGoogleAccount, setIsEditingGoogleAccount] = useState(false);
-  const [customGoogleEmail, setCustomGoogleEmail] = useState('');
-  const [savingAccount, setSavingAccount] = useState(false);
 
   // Check OAuth status on mount
   useEffect(() => {
@@ -123,45 +119,30 @@ export default function GoogleMeetCard({
       const meetingCodeParam = params.get('meeting_code');
 
       if (googleAuthParam === 'success' && active) {
-        success(`Google Meet account connected (${googleAuthEmail || 'authorized'})`, 'OAuth Connected');
+        success(`Google account connected${googleAuthEmail ? ` (${googleAuthEmail})` : ''}.`, 'OAuth Connected');
         setAuthStatus((prev) => ({
           ...prev,
           is_connected: true,
           email: googleAuthEmail || prev.email,
         }));
-      } else if (googleAuthParam === 'error' && active) {
-        toastError('Google authorization was cancelled or denied.', 'OAuth Error');
-      }
-
-      // If redirected with created meeting space
-      if ((meetCreatedParam === 'true' || meetingUriParam) && active) {
-        const cleanUri = meetingUriParam || '';
-        const cleanCode = meetingCodeParam || (cleanUri ? cleanUri.split('/').pop() : '');
-        setMeetData((prev) => ({
-          ...prev,
-          meetingUri: cleanUri,
-          meetingCode: cleanCode,
-          meetingStatus: 'meet_ready',
-        }));
-        success('Google Meet Space is ready for consultation.', 'Meeting Ready');
-        if (onStatusChange) onStatusChange('meet_ready');
-        if (onConsultationUpdated) onConsultationUpdated();
-
-        const apptId = appointment?.id || consultation?.appointment_id;
-        if (apptId && cleanUri) {
-          acceptAppointmentFirestore(apptId, cleanUri, cleanCode).catch(() => null);
-        }
-
-        // Clean query parameters from URL without reloading
+        // Clean URL params
         try {
           const url = new URL(window.location.href);
-          url.searchParams.delete('google_auth');
-          url.searchParams.delete('meet_created');
-          url.searchParams.delete('meeting_uri');
-          url.searchParams.delete('meeting_code');
-          url.searchParams.delete('email');
-          window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+          ['google_auth', 'email', 'error_code', 'error_msg'].forEach((k) => url.searchParams.delete(k));
+          window.history.replaceState({}, '', url.pathname + (url.search || ''));
         } catch {}
+      } else if (googleAuthParam === 'failed' && active) {
+        const errCode = params.get('error_code') || '';
+        const errMsg = params.get('error_msg') || 'Google authorization failed.';
+        toastError(`${errCode ? `[${errCode}] ` : ''}${errMsg}`, 'OAuth Error');
+        // Clean URL params
+        try {
+          const url = new URL(window.location.href);
+          ['google_auth', 'email', 'error_code', 'error_msg'].forEach((k) => url.searchParams.delete(k));
+          window.history.replaceState({}, '', url.pathname + (url.search || ''));
+        } catch {}
+      } else if (googleAuthParam === 'error' && active) {
+        toastError('Google authorization was cancelled or denied.', 'OAuth Error');
       }
 
       const cachedEmail = localStorage.getItem('kenko_doctor_google_email');
@@ -175,21 +156,16 @@ export default function GoogleMeetCard({
           setAuthStatus({
             is_connected: Boolean(res.is_connected),
             email: res.email || null,
-            is_mock: Boolean(res.is_mock),
             checked: true,
           });
-          if (res.email) {
-            setCustomGoogleEmail(res.email);
-          }
         }
-      } catch {
+      } catch (err) {
+        const errCode = err?.response?.data?.error || '';
         if (active) {
-          setAuthStatus({
-            is_connected: false,
-            email: null,
-            is_mock: false,
-            checked: true,
-          });
+          setAuthStatus({ is_connected: false, email: null, checked: true });
+          if (errCode === 'GOOGLE_OAUTH_NOT_CONFIGURED') {
+            // Silently set disconnected — server is not configured
+          }
         }
       }
 
@@ -330,52 +306,31 @@ export default function GoogleMeetCard({
         toastError(res.message || 'Google OAuth is not configured on the backend.', 'Configuration Required');
       }
     } catch (err) {
-      console.error('Google OAuth URL redirect note:', err);
-      const errMsg = err?.response?.data?.message || err?.message || 'Could not initiate Google authorization.';
-      toastError(errMsg, 'OAuth Error');
+      const errDetail = err?.response?.data;
+      const errCode = errDetail?.error || '';
+      const errMsg = errDetail?.message || err?.message || 'Could not initiate Google authorization.';
+      if (errCode === 'GOOGLE_OAUTH_NOT_CONFIGURED') {
+        toastError(
+          'Google OAuth credentials are not configured on the server. Contact your administrator.',
+          'Configuration Error'
+        );
+      } else {
+        toastError(errMsg, 'OAuth Error');
+      }
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleSaveGoogleAccount = async (e) => {
-    if (e) e.preventDefault();
-    const cleanEmail = customGoogleEmail.trim();
-    if (!cleanEmail || !cleanEmail.includes('@')) {
-      toastError('Please enter a valid Google email address.', 'Invalid Email');
-      return;
-    }
-    try {
-      setSavingAccount(true);
-      localStorage.setItem('kenko_doctor_google_email', cleanEmail);
-      setAuthStatus({
-        is_connected: true,
-        email: cleanEmail,
-        is_mock: false,
-        checked: true,
-      });
-      setIsEditingGoogleAccount(false);
-      success(`Google Meet account saved as ${cleanEmail}`, 'Account Updated');
-      await updateGoogleAccount(cleanEmail).catch(() => null);
-    } catch {
-      setIsEditingGoogleAccount(false);
-      success(`Google Meet account saved as ${cleanEmail}`, 'Account Saved');
-    } finally {
-      setSavingAccount(false);
     }
   };
 
   const handleDisconnect = async () => {
     try {
       setLoading(true);
-      localStorage.removeItem('kenko_doctor_google_email');
-      await disconnectGoogleAuth().catch(() => null);
-      setAuthStatus({ is_connected: false, email: null, is_mock: false, checked: true });
-      info('Google Meet account disconnected.', 'Disconnected');
-    } catch {
-      localStorage.removeItem('kenko_doctor_google_email');
-      setAuthStatus({ is_connected: false, email: null, is_mock: false, checked: true });
-      info('Google Meet account disconnected.', 'Disconnected');
+      await disconnectGoogleAuth();
+      setAuthStatus({ is_connected: false, email: null, checked: true });
+      info('Google account disconnected.', 'Disconnected');
+    } catch (err) {
+      const errMsg = err?.response?.data?.message || err?.message || 'Failed to disconnect Google account.';
+      toastError(errMsg, 'Disconnect Error');
     } finally {
       setLoading(false);
     }
@@ -423,12 +378,20 @@ export default function GoogleMeetCard({
       const errCode = (typeof errObj === 'object' ? errObj?.code : errObj) || errData?.detail?.error || '';
       const errMsg = (typeof errObj === 'object' ? errObj?.message : errData?.message) || errData?.detail?.message || errData?.detail || err?.message || 'Failed to create Google Meet space.';
 
-      if (errCode === 'GOOGLE_AUTH_REQUIRED' || errCode === 'GOOGLE_TOKEN_EXPIRED' || err?.response?.status === 401) {
-        info('Doctor Google authorization is required before starting telehealth.', 'Google Account Required');
+      if (errCode === 'GOOGLE_TOKEN_REFRESH_FAILED' || (err?.response?.status === 401 && errMsg.includes('refresh'))) {
+        toastError('Your Google OAuth token expired and could not be refreshed. Please reconnect Google.', 'Reconnect Required');
+        setAuthStatus((prev) => ({ ...prev, is_connected: false }));
+        setMeetCreationError('Google token expired. Please reconnect your Google account and try again.');
+        setMeetData((prev) => ({ ...prev, meetingStatus: 'meet_creation_failed' }));
+      } else if (errCode === 'GOOGLE_AUTH_REQUIRED' || errCode === 'GOOGLE_TOKEN_EXPIRED' || err?.response?.status === 401) {
+        toastError('Google authorization is required. Please connect your Google account.', 'Google Account Required');
         setAuthStatus((prev) => ({ ...prev, is_connected: false }));
         setMeetCreationError('Google connection required to generate video rooms.');
+      } else if (errCode === 'FIREBASE_SYNC_FAILED') {
+        toastError('Meet was created but could not sync to Firestore. Please retry.', 'Sync Failed');
+        setMeetCreationError(`FIREBASE_SYNC_FAILED: ${errMsg}`);
       } else {
-        const displayErr = errCode ? `Error: ${errCode} — ${errMsg}` : errMsg;
+        const displayErr = errCode ? `[${errCode}] ${errMsg}` : errMsg;
         setMeetCreationError(displayErr);
         setMeetData((prev) => ({ ...prev, meetingStatus: 'meet_creation_failed' }));
         toastError(displayErr, 'Creation Error');
@@ -637,41 +600,37 @@ export default function GoogleMeetCard({
             </div>
           </div>
 
-          {/* Account Settings for Doctor / Connection Indicator */}
+          {/* Google Connection Status Indicator for Doctor */}
           {isDoctor && (
             <div className="flex items-center gap-2">
               {authStatus.is_connected ? (
                 <div className="flex items-center gap-1.5">
                   <span className="badge badge-success text-xs flex items-center gap-1 py-1 px-2.5">
                     <IconCheck size={12} />
-                    <span>{authStatus.email || 'Connected'}</span>
+                    <span>{authStatus.email || 'Google Connected'}</span>
                   </span>
                   <button
                     type="button"
-                    className="btn btn-ghost btn-xs text-muted hover:text-primary flex items-center gap-1"
-                    onClick={() => {
-                      setCustomGoogleEmail(authStatus.email || '');
-                      setIsEditingGoogleAccount(true);
-                    }}
-                    title="Configure Google Meet Account"
+                    className="btn btn-ghost btn-xs text-muted hover:text-danger flex items-center gap-1"
+                    onClick={handleDisconnect}
+                    disabled={loading}
+                    title="Disconnect Google Account"
                   >
-                    <IconSettings size={12} />
-                    <span>Edit</span>
+                    <span style={{ fontSize: '0.75rem' }}>✕</span>
+                    <span>Disconnect</span>
                   </button>
                 </div>
-              ) : (
+              ) : authStatus.checked ? (
                 <button
                   type="button"
                   className="btn btn-ghost btn-xs text-secondary flex items-center gap-1 border border-subtle"
-                  onClick={() => {
-                    setCustomGoogleEmail('');
-                    setIsEditingGoogleAccount(true);
-                  }}
+                  onClick={handleConnectGoogle}
+                  disabled={loading}
                 >
                   <IconGoogle size={13} />
-                  <span>Set Google Meet ID</span>
+                  <span>Connect Google</span>
                 </button>
-              )}
+              ) : null}
             </div>
           )}
         </div>

@@ -14,20 +14,19 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.models.db_models import User, Consultation
+from app.models.db_models import User
 from app.models.schemas import (
     GoogleAuthUrlResponse,
     GoogleAuthStatusResponse,
-    UpdateGoogleAccountRequest,
 )
-from app.utils.auth import get_current_user
+from app.utils.auth import get_current_user, require_authenticated_user
 from app.services.google_oauth_service import google_oauth_service
-from app.services.google_meet_service import google_meet_service
-from app.services.firebase_service import firebase_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/google", tags=["Google OAuth"])
+
+# Removed import of google_meet_service — Meet creation is not done in OAuth callback.
 
 
 class GoogleOAuthCallbackBody(BaseModel):
@@ -35,24 +34,28 @@ class GoogleOAuthCallbackBody(BaseModel):
     state: Optional[str] = None
 
 
-@router.get("/auth", response_model=GoogleAuthUrlResponse, summary="Get Google Meet OAuth Authorization URL")
+@router.get("/auth", response_model=GoogleAuthUrlResponse, summary="Get Google OAuth Authorization URL")
 def get_google_auth_url(
     return_url: Optional[str] = Query(None),
     consultation_id: Optional[str] = Query(None),
     appointment_id: Optional[str] = Query(None),
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User = Depends(require_authenticated_user),
 ):
     """
-    Returns the Google OAuth 2.0 authorization URL requesting Meet space creation & readonly scopes.
-    Preserves consultation_id and appointment_id in state parameter.
+    Returns the Google OAuth 2.0 authorization URL.
+    Requires authentication: user_id is taken from the JWT, never defaulted.
     """
-    user_id = current_user.id if current_user else "default_doctor"
     res = google_oauth_service.generate_auth_url(
-        user_id=user_id,
+        user_id=current_user.id,
         return_url=return_url,
         consultation_id=consultation_id,
         appointment_id=appointment_id,
     )
+    if res.get("error"):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE if res["error"] == "GOOGLE_OAUTH_NOT_CONFIGURED" else status.HTTP_400_BAD_REQUEST,
+            detail={"error": res["error"], "message": res.get("message")},
+        )
     return GoogleAuthUrlResponse(
         auth_url=res["auth_url"],
         state=res["state"],
@@ -67,78 +70,19 @@ async def _process_oauth_callback(
     db: Session,
 ) -> Dict[str, Any]:
     """
-    Core handler for OAuth code exchange, Meet space creation, and Firestore synchronization.
+    Core OAuth callback handler: ONLY exchanges code for tokens and stores credentials.
+    Does NOT create a Google Meet space here.
+    Meet creation must be triggered explicitly by doctor via POST /api/meet/create.
     """
     res = await google_oauth_service.exchange_code(code=code, state=state or "", db=db)
-    user_id = res.get("user_id", "default_doctor")
-    email = res.get("email", "")
-    return_url = res.get("return_url")
-    consultation_id = res.get("consultation_id")
-    appointment_id = res.get("appointment_id")
-
-    meet_uri = None
-    meet_code = None
-    space_name = None
-
-    # Automatically create Google Meet space if consultation or appointment context exists
-    if consultation_id or appointment_id:
-        logger.info(
-            f"[OAuth Callback] Creating Google Meet space for user={user_id}, "
-            f"consultation={consultation_id}, appointment={appointment_id}"
-        )
-        try:
-            meet_res = await google_meet_service.create_space(user_id=user_id, db=db)
-            meet_uri = meet_res.get("meetingUri")
-            meet_code = meet_res.get("meetingCode")
-            space_name = meet_res.get("name")
-            logger.info(f"[OAuth Callback] Meet API returned URL={meet_uri}, Code={meet_code}, Space={space_name}")
-
-            # Update SQL Consultation record
-            if consultation_id:
-                consult = db.query(Consultation).filter(Consultation.id == consultation_id).first()
-                if not consult:
-                    consult = db.query(Consultation).filter(Consultation.appointment_id == consultation_id).first()
-                if not consult:
-                    consult = Consultation(
-                        id=consultation_id,
-                        appointment_id=appointment_id or consultation_id,
-                        doctor_id=user_id,
-                        patient_id="patient_placeholder",
-                        patient_name="Patient",
-                        consultation_type="video",
-                        meeting_status="meet_ready",
-                    )
-                    db.add(consult)
-                consult.google_space_name = space_name
-                consult.google_meeting_uri = meet_uri
-                consult.google_meeting_code = meet_code
-                consult.meeting_status = "meet_ready"
-                consult.consultation_type = "video"
-                db.commit()
-
-            # Save to Firestore
-            target_appt_id = appointment_id or consultation_id
-            await firebase_service.sync_appointment_meet(
-                appointment_id=target_appt_id,
-                space_name=space_name or "",
-                meet_uri=meet_uri or "",
-                meet_code=meet_code or "",
-                consultation_id=consultation_id,
-                doctor_id=user_id,
-            )
-            logger.info(f"[OAuth Callback] Saved meeting info to Firestore: appt={target_appt_id}, consult={consultation_id}")
-        except Exception as meet_err:
-            logger.error(f"[OAuth Callback] Meet space creation warning: {meet_err}")
-
     return {
         "success": True,
-        "email": email,
-        "return_url": return_url,
-        "consultation_id": consultation_id,
-        "appointment_id": appointment_id,
-        "meetingUri": meet_uri,
-        "meetingCode": meet_code,
-        "spaceName": space_name,
+        "user_id": res.get("user_id"),
+        "email": res.get("email", ""),
+        "return_url": res.get("return_url"),
+        "consultation_id": res.get("consultation_id"),
+        "appointment_id": res.get("appointment_id"),
+        # No meetingUri — Meet is created only when doctor clicks Create Meeting
     }
 
 
@@ -177,17 +121,19 @@ async def google_oauth_callback_get(
             "google_auth=success",
             f"email={urllib.parse.quote(data.get('email') or '')}",
         ]
-        if data.get("meetingUri"):
-            redirect_params.append("meet_created=true")
-            redirect_params.append(f"meeting_uri={urllib.parse.quote(data['meetingUri'])}")
-        if data.get("meetingCode"):
-            redirect_params.append(f"meeting_code={urllib.parse.quote(data['meetingCode'])}")
-
+        # Note: no meet_created param — Meet is created only by explicit doctor action
         final_url = f"{target_url}{sep}{'&'.join(redirect_params)}"
-        logger.info(f"[OAuth Callback GET] Final redirect to: {final_url}")
+        logger.info(f"[OAuth Callback GET] Redirecting to: {final_url}")
         return RedirectResponse(url=final_url, status_code=status.HTTP_302_FOUND)
+    except ValueError as exc:
+        err_str = str(exc)
+        logger.error(f"[OAuth Callback GET] ValueError: {err_str}")
+        return RedirectResponse(
+            url=f"{default_redirect}?google_auth=failed&error_code={urllib.parse.quote(err_str.split(':')[0])}&error_msg={urllib.parse.quote(err_str)}",
+            status_code=status.HTTP_302_FOUND,
+        )
     except Exception as exc:
-        logger.error(f"[OAuth Callback GET] Processing error: {exc}")
+        logger.error(f"[OAuth Callback GET] Unexpected error: {exc}")
         return RedirectResponse(
             url=f"{default_redirect}?google_auth=failed&error_msg={urllib.parse.quote(str(exc))}",
             status_code=status.HTTP_302_FOUND,
@@ -212,46 +158,27 @@ async def google_oauth_callback_post(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
-@router.get("/status", response_model=GoogleAuthStatusResponse, summary="Check Google Meet connection status")
+@router.get("/status", response_model=GoogleAuthStatusResponse, summary="Check Google OAuth connection status")
 def get_google_connection_status(
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    """Checks if the logged-in doctor/user has connected their Google Meet account."""
-    user_id = current_user.id if current_user else "default_doctor"
-    status_info = google_oauth_service.get_connection_status(user_id=user_id, db=db)
+    """Checks if the logged-in doctor has connected their Google account. Requires authentication."""
+    status_info = google_oauth_service.get_connection_status(user_id=current_user.id, db=db)
     return GoogleAuthStatusResponse(
         is_connected=status_info["is_connected"],
         email=status_info.get("email"),
         scopes=status_info.get("scopes", []),
         expires_at=status_info.get("expires_at"),
-        is_mock=status_info.get("is_mock", False),
+        is_mock=False,
     )
 
 
-@router.post("/account", summary="Update or customize Google Account email for Google Meet")
-def update_google_account(
-    req: UpdateGoogleAccountRequest,
-    current_user: Optional[User] = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Allows doctor to edit or customize their Google Account / Google ID specifically for Google Meet."""
-    if not req.email or "@" not in req.email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A valid Google email address is required.",
-        )
-    user_id = current_user.id if current_user else "default_doctor"
-    res = google_oauth_service.update_google_email(user_id=user_id, email=req.email, db=db)
-    return res
-
-
-@router.post("/disconnect", summary="Disconnect Google Meet account")
+@router.post("/disconnect", summary="Disconnect Google account")
 async def disconnect_google_account(
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    """Revokes token and removes stored credentials."""
-    user_id = current_user.id if current_user else "default_doctor"
-    success = await google_oauth_service.disconnect(user_id=user_id, db=db)
-    return {"success": success, "message": "Google Meet disconnected successfully."}
+    """Revokes token and removes stored credentials for the authenticated user."""
+    success_result = await google_oauth_service.disconnect(user_id=current_user.id, db=db)
+    return {"success": success_result, "message": "Google account disconnected."}
