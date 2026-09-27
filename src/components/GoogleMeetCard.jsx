@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   getGoogleAuthStatus,
   getGoogleAuthUrl,
@@ -304,7 +304,9 @@ export default function GoogleMeetCard({
       }
       if (res?.error) {
         toastError(res.message || 'Google OAuth is not configured on the backend.', 'Configuration Required');
+        return;
       }
+      toastError('Could not retrieve Google authorization URL. Please check backend connection.', 'OAuth Error');
     } catch (err) {
       const errDetail = err?.response?.data;
       const errCode = errDetail?.error || '';

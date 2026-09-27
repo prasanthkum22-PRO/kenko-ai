@@ -153,23 +153,54 @@ app.include_router(appointment_router)
 
 
 
+from fastapi.responses import FileResponse, JSONResponse
+
 # ── Health Checks ─────────────────────────────────────────────
-@app.get("/", tags=["Health"])
-async def root():
-    return {
-        "service": "MediBridge AI Clinical Intelligence API",
-        "tagline": "From Conversation to Connected Care",
-        "status": "running",
-        "version": "3.0.0",
-        "differentiator": "Capture -> Understand -> Verify -> Personalize -> Route -> Follow Up",
-        "ai_stack": "NVIDIA Cloud STT (whisper-large-v3) + Deterministic Clinical Extraction + SQLite",
-        "local_models": "none",
-    }
-
-
 @app.get("/health", tags=["Health"])
+@app.get("/api/health", tags=["Health"])
 async def health_check():
     return {"status": "ok", "service": "MediBridge AI"}
+
+
+# ── Frontend Static Assets & SPA Fallback ─────────────────────
+# Look for built frontend in dist/ directory (for unified Render deployment)
+possible_dist_dirs = [
+    Path(__file__).resolve().parent.parent.parent / "dist",
+    Path("dist").resolve(),
+    Path("/opt/render/project/src/dist").resolve(),
+]
+dist_dir = next((d for d in possible_dist_dirs if d.is_dir() and (d / "index.html").is_file()), None)
+
+if dist_dir:
+    logging.info(f"Serving frontend SPA from: {dist_dir}")
+    assets_dir = dist_dir / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa_or_static(full_path: str):
+        # Do not intercept unmatched /api/* requests with HTML
+        if full_path.startswith("api/") or full_path == "api":
+            return JSONResponse(
+                status_code=404,
+                content={"error": "NOT_FOUND", "message": f"API endpoint /{full_path} not found"},
+            )
+        target_file = dist_dir / full_path
+        if target_file.is_file():
+            return FileResponse(target_file)
+        return FileResponse(dist_dir / "index.html")
+else:
+    @app.get("/", tags=["Health"])
+    async def root():
+        return {
+            "service": "MediBridge AI Clinical Intelligence API",
+            "tagline": "From Conversation to Connected Care",
+            "status": "running",
+            "version": "3.0.0",
+            "differentiator": "Capture -> Understand -> Verify -> Personalize -> Route -> Follow Up",
+            "ai_stack": "NVIDIA Cloud STT (whisper-large-v3) + Deterministic Clinical Extraction + SQLite",
+            "local_models": "none",
+        }
 
 
 if __name__ == "__main__":
@@ -180,3 +211,4 @@ if __name__ == "__main__":
         port=int(os.getenv("APP_PORT", "8000")),
         reload=True,
     )
+

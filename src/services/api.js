@@ -33,6 +33,27 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
+// ─── Response Interceptor — Guard against HTML responses from API endpoints ──
+api.interceptors.response.use(
+  (response) => {
+    if (
+      typeof response.data === 'string' &&
+      (response.data.trim().startsWith('<!doctype html>') ||
+        response.data.trim().startsWith('<!DOCTYPE html>') ||
+        response.data.trim().startsWith('<html') ||
+        response.data.includes('<div id="root">'))
+    ) {
+      const err = new Error(
+        'Backend API returned HTML instead of JSON. Ensure the FastAPI backend server is running and deployed.'
+      );
+      err.isHtmlResponse = true;
+      return Promise.reject(err);
+    }
+    return response;
+  },
+  (error) => Promise.reject(error)
+);
+
 // ─── Auth API ─────────────────────────────────────────────────
 
 export const registerUser = async (userData) => {
