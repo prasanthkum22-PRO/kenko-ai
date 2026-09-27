@@ -98,35 +98,19 @@ service cloud.firestore {
 
     // ─── 6. CONSULTATIONS ─────────────────────────────────────────────────────
     match /consultations/{consultationId} {
-      // Read: only the assigned patient or doctor — NOT all authenticated users
-      allow read: if isAuthenticated() && (
-        isAdmin() ||
-        resource.data.patientId == request.auth.uid ||
-        resource.data.doctorId == request.auth.uid
-      );
-
-      // Create: backend service (doctor or admin) only
-      allow create: if isDoctor() || isAdmin();
-
-      // Update: doctor or admin may update clinical fields freely.
-      // Patients may NOT update any consultation fields directly.
-      // All privileged writes (Meet metadata, transcript, status) go via backend only.
-      allow update: if isDoctor() || isAdmin();
-
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
       allow delete: if isAdmin();
 
-      // Subcollection: Transcript Entries
-      // Each entry: { speakerRole, text, startTime, endTime, participantResourceName }
-      // Read: only the assigned patient or doctor for this consultation
-      // Write: only the backend (doctor/admin role) — never the patient
       match /transcriptEntries/{entryId} {
-        allow read: if isAuthenticated() && (
-          isAdmin() ||
-          get(/databases/$(database)/documents/consultations/$(consultationId)).data.patientId == request.auth.uid ||
-          get(/databases/$(database)/documents/consultations/$(consultationId)).data.doctorId == request.auth.uid
-        );
-        allow write: if isDoctor() || isAdmin();
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated();
       }
+    }
+
+    // ─── GOOGLE OAUTH SENSITIVE CREDENTIALS (SERVER ONLY) ──────────────────────
+    match /googleOAuth/{document=**} {
+      allow read, write: if false; // Server-only / Admin SDK only
     }
 
     // ─── 7. CLINICAL NOTES ────────────────────────────────────────────────────

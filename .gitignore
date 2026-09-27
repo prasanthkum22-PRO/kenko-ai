@@ -48,7 +48,8 @@ backend/uploads/
 
 # ── AI Model Weights & Caches (NEVER commit these) ───────────
 # Local Whisper / faster-whisper model files
-models/
+/models/
+!backend/app/models/
 model_cache/
 *.gguf
 *.safetensors

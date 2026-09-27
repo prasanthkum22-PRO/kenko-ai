@@ -259,8 +259,38 @@ export default function VideoConsultationPage() {
       }
 
       if (cData) {
-        setConsultation(cData);
-        const tStatus = cData.transcript_status || 'pending';
+        const meetingUri =
+          cData.googleMeetingUri ||
+          cData.google_meeting_uri ||
+          cData.meeting?.meetingUrl ||
+          cData.meeting?.meetingUri ||
+          cData.meetingUri ||
+          null;
+        const meetingCode =
+          cData.googleMeetingCode ||
+          cData.google_meeting_code ||
+          cData.meeting?.meetingCode ||
+          cData.meetingCode ||
+          (meetingUri ? meetingUri.split('/').pop() : null);
+        const spaceName =
+          cData.googleSpaceName ||
+          cData.google_space_name ||
+          cData.meeting?.spaceName ||
+          cData.spaceName ||
+          null;
+
+        const mergedData = {
+          ...cData,
+          google_meeting_uri: meetingUri,
+          google_meeting_code: meetingCode,
+          google_space_name: spaceName,
+          meeting_status: meetingUri ? 'meet_ready' : cData.meeting_status || cData.meetingStatus || 'scheduled',
+        };
+        setConsultation(mergedData);
+        if (meetingUri) {
+          setTimerActive(true);
+        }
+        const tStatus = cData.transcript_status || cData.transcriptStatus || 'pending';
         setTranscriptStatus(tStatus);
         if (tStatus === 'ready' || cData.status === 'transcript_ready') {
           try {

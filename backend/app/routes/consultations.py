@@ -20,6 +20,7 @@ from app.models.db_models import (
     TranscriptSegment,
     ClinicalSummary,
     AuditLog,
+    User,
 )
 from app.models.schemas import (
     CreateConsultationRequest,
@@ -30,10 +31,13 @@ from app.models.schemas import (
     ConsultationChatRequest,
     ConsultationChatResponse,
 )
+from app.utils.auth import get_current_user
 from app.services.speech import speech_service
 from app.services.ai_service import ai_service
 from app.services.router import route_approved_consultation
 from app.services.audit import log_action
+from app.services.google_meet_service import google_meet_service
+from app.services.firebase_service import firebase_service
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +262,85 @@ def get_consultation(id: str, db: Session = Depends(get_db)):
             "approved_by": latest_summary.approved_by,
             "approved_at": latest_summary.approved_at.isoformat() if latest_summary.approved_at else None,
         } if latest_summary else None,
+    }
+
+
+@router.post("/{id}/google-meet", summary="Create or retrieve Google Meet space for a consultation (idempotent)")
+async def create_consultation_google_meet(
+    id: str,
+    current_user: Optional[User] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    c = db.query(Consultation).filter(Consultation.id == id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail=f"Consultation '{id}' not found")
+
+    # Idempotency check: return existing if already created
+    if c.google_meeting_uri and c.meeting_status not in ("scheduled", "SCHEDULED", "meet_creation_failed", "MEET_CREATION_FAILED", ""):
+        return {
+            "success": True,
+            "consultationId": c.id,
+            "spaceName": c.google_space_name,
+            "meetingUri": c.google_meeting_uri,
+            "meetingCode": c.google_meeting_code,
+            "meetingUrl": c.google_meeting_uri,
+            "status": "READY",
+            "message": "Google Meet Space already exists.",
+        }
+
+    user_id = current_user.id if current_user else (c.doctor_id or "default_doctor")
+    space_data = await google_meet_service.create_space(user_id=user_id, db=db)
+    space_name = space_data.get("name")
+    meeting_uri = space_data.get("meetingUri")
+    meeting_code = space_data.get("meetingCode")
+
+    c.google_space_name = space_name
+    c.google_meeting_uri = meeting_uri
+    c.google_meeting_code = meeting_code
+    c.meeting_status = "meet_ready"
+    c.consultation_type = "video"
+    db.commit()
+
+    # Sync to Firestore
+    try:
+        await firebase_service.sync_appointment_meet(
+            appointment_id=c.appointment_id or c.id,
+            space_name=space_name or "",
+            meet_uri=meeting_uri or "",
+            meet_code=meeting_code or "",
+            consultation_id=c.id,
+        )
+    except Exception as fe:
+        logger.debug(f"Firestore meet sync note: {fe}")
+
+    return {
+        "success": True,
+        "consultationId": c.id,
+        "spaceName": space_name,
+        "meetingUri": meeting_uri,
+        "meetingCode": meeting_code,
+        "meetingUrl": meeting_uri,
+        "status": "READY",
+        "message": "Google Meet Space created successfully.",
+    }
+
+
+@router.get("/{id}/meeting", summary="Get Google Meet information for a consultation")
+def get_consultation_meeting(id: str, db: Session = Depends(get_db)):
+    c = db.query(Consultation).filter(Consultation.id == id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail=f"Consultation '{id}' not found")
+    return {
+        "success": bool(c.google_meeting_uri),
+        "consultationId": c.id,
+        "spaceName": c.google_space_name,
+        "meetingUri": c.google_meeting_uri,
+        "meetingCode": c.google_meeting_code,
+        "meetingUrl": c.google_meeting_uri,
+        "meetingStatus": c.meeting_status or "scheduled",
+        "status": "READY" if c.google_meeting_uri else "SCHEDULED",
+        "createdAt": c.created_at.isoformat() if c.created_at else None,
+        "provider": "google_meet",
     }
 
 

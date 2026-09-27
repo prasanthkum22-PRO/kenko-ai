@@ -248,6 +248,16 @@ export const getGoogleMeetTranscript = async (consultationId) => {
   return res.data;
 };
 
+export const getConsultationMeeting = async (consultationId) => {
+  const res = await api.get(`/api/consultations/${consultationId}/meeting`);
+  return res.data;
+};
+
+export const createConsultationGoogleMeet = async (consultationId) => {
+  const res = await api.post(`/api/consultations/${consultationId}/google-meet`);
+  return res.data;
+};
+
 export const syncGoogleMeetTranscript = async (consultationId) => {
   const res = await api.post(`/api/meet/${consultationId}/sync-transcript`);
   return res.data;

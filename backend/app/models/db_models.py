@@ -681,3 +681,25 @@ class PatientTask(Base):
     completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+
+class GoogleOAuthToken(Base):
+    """Secure server-side storage for doctor's Google OAuth 2.0 credentials for Google Meet."""
+    __tablename__ = "google_oauth_tokens"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(64), nullable=False, unique=True, index=True)  # Doctor / User ID
+    email = Column(String(128), nullable=True)
+    access_token = Column(Text, nullable=False)
+    refresh_token = Column(Text, nullable=True)
+    token_type = Column(String(32), default="Bearer")
+    expires_at = Column(DateTime, nullable=True)
+    scopes = Column(Text, nullable=True)
+    is_valid = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
