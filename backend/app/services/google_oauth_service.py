@@ -127,7 +127,7 @@ class GoogleOAuthService:
             "response_type": "code",
             "scope": " ".join(REQUIRED_SCOPES),
             "access_type": "offline",      # Required to receive a refresh token
-            "prompt": "select_account consent",  # Allows doctor to choose or switch Google account
+            "prompt": "select_account",    # Allows doctor to choose or switch Google account without repeated consent loops
             "include_granted_scopes": "true",
             "state": state_encoded,
         }

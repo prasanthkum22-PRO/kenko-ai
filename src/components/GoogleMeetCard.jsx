@@ -190,10 +190,50 @@ export default function GoogleMeetCard({
           });
         }
       }
+
+      // Immediate meeting check on mount
+      const consultId = consultation?.id || consultation?.consultation_id || appointment?.consultation_id;
+      const apptId = appointment?.id || consultation?.appointment_id;
+      if (consultId || apptId) {
+        try {
+          if (consultId) {
+            const mRes = await getConsultationMeeting(consultId).catch(() => null);
+            if (active && (mRes?.meeting?.meetingUrl || mRes?.meetingUri || mRes?.meetingUrl)) {
+              const uri = mRes.meeting?.meetingUrl || mRes.meetingUri || mRes.meetingUrl;
+              const code = mRes.meeting?.meetingCode || mRes.meetingCode || (uri ? uri.split('/').pop() : null);
+              const space = mRes.meeting?.spaceName || mRes.spaceName;
+              setMeetData((prev) => ({
+                ...prev,
+                meetingUri: uri,
+                meetingCode: code || prev.meetingCode,
+                spaceName: space || prev.spaceName,
+                meetingStatus: 'meet_ready',
+              }));
+              if (onStatusChange) onStatusChange('meet_ready');
+              if (onConsultationUpdated) onConsultationUpdated();
+            }
+          }
+          if (apptId && active) {
+            const aptFs = await getAppointmentFirestore(apptId).catch(() => null);
+            const mUri = aptFs?.googleMeetingUri || aptFs?.googleMeet?.meetingUri || aptFs?.meeting?.meetingUrl;
+            if (mUri) {
+              setMeetData((prev) => ({
+                ...prev,
+                meetingUri: mUri,
+                meetingCode: aptFs?.googleMeetingCode || aptFs?.googleMeet?.meetingCode || aptFs?.meeting?.meetingCode || mUri.split('/').pop(),
+                spaceName: aptFs?.googleSpaceName || aptFs?.googleMeet?.spaceName || prev.spaceName,
+                meetingStatus: 'meet_ready',
+              }));
+              if (onStatusChange) onStatusChange('meet_ready');
+              if (onConsultationUpdated) onConsultationUpdated();
+            }
+          }
+        } catch {}
+      }
     }
     checkAuth();
     return () => { active = false; };
-  }, []);
+  }, [consultation?.id, appointment?.id]);
 
   // Sync meetData with props
   useEffect(() => {
@@ -205,6 +245,7 @@ export default function GoogleMeetCard({
         meetingCode: info.code || prev.meetingCode,
         meetingStatus: info.uri ? 'meet_ready' : (info.status || prev.meetingStatus),
         transcriptStatus: info.transcript || prev.transcriptStatus,
+        createdAt: info.createdAt || prev.createdAt,
       }));
       if (consultation?.has_consent !== undefined) {
         setConsentConfirmed(Boolean(consultation.has_consent));
@@ -229,8 +270,8 @@ export default function GoogleMeetCard({
         try {
           if (targetConsultId) {
             const mRes = await getConsultationMeeting(targetConsultId).catch(() => null);
-            if (mRes?.meeting?.meetingUrl || mRes?.meetingUri) {
-              const uri = mRes.meeting?.meetingUrl || mRes.meetingUri;
+            if (mRes?.meeting?.meetingUrl || mRes?.meetingUri || mRes?.meetingUrl) {
+              const uri = mRes.meeting?.meetingUrl || mRes.meetingUri || mRes.meetingUrl;
               const code = mRes.meeting?.meetingCode || mRes.meetingCode;
               const space = mRes.meeting?.spaceName || mRes.spaceName;
               setMeetData((prev) => ({
@@ -247,12 +288,12 @@ export default function GoogleMeetCard({
           }
           if (targetApptId) {
             const aptFs = await getAppointmentFirestore(targetApptId).catch(() => null);
-            const mUri = aptFs?.googleMeetingUri || aptFs?.googleMeet?.meetingUri;
+            const mUri = aptFs?.googleMeetingUri || aptFs?.googleMeet?.meetingUri || aptFs?.meeting?.meetingUrl;
             if (mUri) {
               setMeetData((prev) => ({
                 ...prev,
                 meetingUri: mUri,
-                meetingCode: aptFs?.googleMeetingCode || aptFs?.googleMeet?.meetingCode || mUri.split('/').pop(),
+                meetingCode: aptFs?.googleMeetingCode || aptFs?.googleMeet?.meetingCode || aptFs?.meeting?.meetingCode || mUri.split('/').pop(),
                 spaceName: aptFs?.googleSpaceName || aptFs?.googleMeet?.spaceName || prev.spaceName,
                 meetingStatus: 'meet_ready',
               }));
@@ -295,7 +336,7 @@ export default function GoogleMeetCard({
         appointment_id: apptId,
       })
     );
-    const directGoogleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes)}&access_type=offline&prompt=select_account%20consent&include_granted_scopes=true&state=${statePayload}`;
+    const directGoogleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes)}&access_type=offline&prompt=select_account&include_granted_scopes=true&state=${statePayload}`;
 
     try {
       setLoading(true);
