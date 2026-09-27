@@ -102,7 +102,6 @@ class GoogleOAuthService:
                 pass
 
         state_data = json.dumps(state_payload)
-        state_encoded = urllib.parse.quote(state_data)
         redirect_uri = self.get_redirect_uri_for_request(return_url)
 
         logger.info(
@@ -113,10 +112,10 @@ class GoogleOAuthService:
         if not self.is_configured:
             mock_target = return_url or f"{self.frontend_url}/consultations"
             sep = "&" if "?" in mock_target else "?"
-            mock_auth_url = f"{mock_target}{sep}google_mock_auth=success&uid={user_id}&state={state_encoded}"
+            mock_auth_url = f"{mock_target}{sep}google_mock_auth=success&uid={user_id}&state={urllib.parse.quote(state_data)}"
             return {
                 "auth_url": mock_auth_url,
-                "state": state_encoded,
+                "state": state_data,
                 "is_configured": False,
                 "message": "Google Cloud Client ID not set in .env. Running in test mode.",
             }
@@ -129,12 +128,12 @@ class GoogleOAuthService:
             "access_type": "offline",              # Required to receive a refresh token
             "prompt": "consent select_account",    # Guarantees Google returns refresh_token every time
             "include_granted_scopes": "true",
-            "state": state_encoded,
+            "state": state_data,
         }
         auth_url = f"{GOOGLE_AUTH_ENDPOINT}?{urllib.parse.urlencode(params)}"
         return {
             "auth_url": auth_url,
-            "state": state_encoded,
+            "state": state_data,
             "is_configured": True,
             "message": "Directing to official Google OAuth consent screen.",
         }
@@ -148,19 +147,54 @@ class GoogleOAuthService:
         return_url = None
         consultation_id = None
         appointment_id = None
-        try:
-            state_data = json.loads(urllib.parse.unquote(state))
-            user_id = state_data.get("uid", "default_doctor")
-            return_url = state_data.get("return_url")
-            consultation_id = state_data.get("consultation_id")
-            appointment_id = state_data.get("appointment_id")
-        except Exception:
-            logger.warning(f"[OAuth Callback] Could not parse state string: {state}")
+
+        if state:
+            curr = str(state).strip()
+            parsed_dict = None
+            # Multi-pass decode to unwrap any double or triple URL-encoding
+            for _ in range(4):
+                try:
+                    if curr.startswith("{") and curr.endswith("}"):
+                        parsed_dict = json.loads(curr)
+                        if isinstance(parsed_dict, dict):
+                            break
+                except Exception:
+                    pass
+                unquoted = urllib.parse.unquote(curr)
+                if unquoted == curr:
+                    break
+                curr = unquoted
+
+            if isinstance(parsed_dict, dict):
+                user_id = parsed_dict.get("uid") or parsed_dict.get("user_id") or "default_doctor"
+                return_url = parsed_dict.get("return_url")
+                consultation_id = parsed_dict.get("consultation_id") or parsed_dict.get("consultId") or parsed_dict.get("id")
+                appointment_id = parsed_dict.get("appointment_id") or parsed_dict.get("apptId")
+            else:
+                try:
+                    qs = urllib.parse.parse_qs(curr)
+                    if "return_url" in qs:
+                        return_url = qs["return_url"][0]
+                    if "consultation_id" in qs:
+                        consultation_id = qs["consultation_id"][0]
+                    if "appointment_id" in qs:
+                        appointment_id = qs["appointment_id"][0]
+                    if "uid" in qs:
+                        user_id = qs["uid"][0]
+                except Exception:
+                    logger.warning(f"[OAuth Callback] Could not parse state string: {state}")
 
         # Fallback extract from return_url
         if return_url:
             try:
                 parsed = urllib.parse.urlparse(return_url)
+                # Path parts: e.g. /video-consultation/{id} or /consultation-workspace/{id} or /telehealth/{id}
+                path_parts = [p for p in parsed.path.split('/') if p]
+                if not consultation_id and path_parts:
+                    for part in reversed(path_parts):
+                        if part not in ("consultation", "consultations", "telehealth", "workspace", "video", "doctor", "patient"):
+                            consultation_id = part
+                            break
                 qs = urllib.parse.parse_qs(parsed.query)
                 if not consultation_id and "id" in qs:
                     consultation_id = qs["id"][0]

@@ -96,12 +96,25 @@ async def _process_oauth_callback(
             # Update SQL Consultation record
             if consultation_id:
                 consult = db.query(Consultation).filter(Consultation.id == consultation_id).first()
-                if consult:
-                    consult.google_space_name = space_name
-                    consult.google_meeting_uri = meet_uri
-                    consult.google_meeting_code = meet_code
-                    consult.meeting_status = "meet_ready"
-                    db.commit()
+                if not consult:
+                    consult = db.query(Consultation).filter(Consultation.appointment_id == consultation_id).first()
+                if not consult:
+                    consult = Consultation(
+                        id=consultation_id,
+                        appointment_id=appointment_id or consultation_id,
+                        doctor_id=user_id,
+                        patient_id="patient_placeholder",
+                        patient_name="Patient",
+                        consultation_type="video",
+                        meeting_status="meet_ready",
+                    )
+                    db.add(consult)
+                consult.google_space_name = space_name
+                consult.google_meeting_uri = meet_uri
+                consult.google_meeting_code = meet_code
+                consult.meeting_status = "meet_ready"
+                consult.consultation_type = "video"
+                db.commit()
 
             # Save to Firestore
             target_appt_id = appointment_id or consultation_id
@@ -111,8 +124,9 @@ async def _process_oauth_callback(
                 meet_uri=meet_uri or "",
                 meet_code=meet_code or "",
                 consultation_id=consultation_id,
+                doctor_id=user_id,
             )
-            logger.info(f"[OAuth Callback] Saved meeting info to Firestore: {target_appt_id}")
+            logger.info(f"[OAuth Callback] Saved meeting info to Firestore: appt={target_appt_id}, consult={consultation_id}")
         except Exception as meet_err:
             logger.error(f"[OAuth Callback] Meet space creation warning: {meet_err}")
 

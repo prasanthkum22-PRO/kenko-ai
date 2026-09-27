@@ -324,10 +324,17 @@ export default function VideoConsultationPage() {
 
   useEffect(() => {
     const authParam = searchParams.get('google_auth');
+    const meetCreatedParam = searchParams.get('meet_created');
+    const meetingUriParam = searchParams.get('meeting_uri');
+
     if (authParam === 'success') {
       success('Google account connected successfully.', 'OAuth Connected');
+      if (meetCreatedParam === 'true' || meetingUriParam) {
+        success('Google Meet space is ready for consultation.', 'Meeting Ready');
+        loadData();
+      }
     }
-  }, [searchParams]);
+  }, [searchParams, loadData]);
 
   useEffect(() => {
     if (timerActive) {
