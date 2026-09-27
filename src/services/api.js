@@ -245,11 +245,6 @@ export const syncGoogleMeetTranscript = async (consultationId) => {
   return res.data;
 };
 
-export const simulateGoogleMeetComplete = async (consultationId) => {
-  const res = await api.post(`/api/meet/${consultationId}/mock-complete`);
-  return res.data;
-};
-
 // ─── Prescriptions API ────────────────────────────────────────
 
 
