@@ -63,6 +63,8 @@ const LandingPage = lazy(() => import('./pages/LandingPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 const AccessDeniedPage = lazy(() => import('./pages/AccessDeniedPage'));
 const GoogleOAuthCallbackPage = lazy(() => import('./pages/GoogleOAuthCallbackPage'));
+const PrivacyPolicyPage = lazy(() => import('./pages/PrivacyPolicyPage'));
+const TermsOfServicePage = lazy(() => import('./pages/TermsOfServicePage'));
 
 /** Branded route-level loading fallback. */
 function RouteFallback() {
@@ -106,6 +108,10 @@ export default function App() {
                     <Route path="/landing" element={<LandingPage />} />
                     <Route path="/login" element={<LoginPage />} />
                     <Route path="/register" element={<RegisterPage />} />
+                    <Route path="/privacy" element={<PrivacyPolicyPage />} />
+                    <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+                    <Route path="/terms" element={<TermsOfServicePage />} />
+                    <Route path="/terms-of-service" element={<TermsOfServicePage />} />
 
                     {/* Google OAuth Callbacks */}
                     <Route path="/api/google/callback" element={<GoogleOAuthCallbackPage />} />
