@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getConsultations, createConsultation } from '../services/api';
+import { getPatients } from '../services/firestoreService';
 import { useToast } from '../context/ToastContext';
 import {
   IconMic,
@@ -11,8 +12,15 @@ import {
   IconArrowRight,
   IconCheck,
   IconSparkle,
+  IconUser,
 } from '../components/icons';
 
+const DEFAULT_DEMO_PATIENTS = [
+  { uid: 'demo-pt-1', name: 'Aarav Sharma', patientId: 'PT-1002', age: 38, gender: 'Male', email: 'aarav.sharma@example.com' },
+  { uid: 'demo-pt-2', name: 'Ananya Kumar', patientId: 'PT-1003', age: 29, gender: 'Female', email: 'ananya.k@example.com' },
+  { uid: 'demo-pt-3', name: 'Devi Sharma', patientId: 'PT-1004', age: 45, gender: 'Female', email: 'devi.sharma@example.com' },
+  { uid: 'demo-pt-4', name: 'Rajesh Patel', patientId: 'PT-1005', age: 52, gender: 'Male', email: 'rajesh.patel@example.com' },
+];
 
 export default function ConsultationsHubPage() {
   const navigate = useNavigate();
@@ -27,6 +35,8 @@ export default function ConsultationsHubPage() {
   const [patientAge, setPatientAge] = useState(38);
   const [patientGender, setPatientGender] = useState('Male');
   const [consentChecked, setConsentChecked] = useState(true);
+  const [patientsList, setPatientsList] = useState(DEFAULT_DEMO_PATIENTS);
+  const [selectedPatientUid, setSelectedPatientUid] = useState('');
 
   const { user } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -54,10 +64,66 @@ export default function ConsultationsHubPage() {
     };
   }, [toastError]);
 
+  useEffect(() => {
+    let active = true;
+    const fetchPatients = async () => {
+      try {
+        const pData = await getPatients();
+        if (active && Array.isArray(pData) && pData.length > 0) {
+          const formatted = pData.map((p) => ({
+            uid: p.uid || p.id,
+            name: p.displayName || p.name || p.full_name || p.email?.split('@')[0] || 'Patient',
+            patientId: p.patientId || `PT-${(p.uid || p.id || '').slice(0, 6).toUpperCase()}`,
+            age: p.age || p.patient_age || 38,
+            gender: p.gender || p.patient_gender || 'Male',
+            email: p.email || '',
+          }));
+          const merged = [...formatted];
+          DEFAULT_DEMO_PATIENTS.forEach((dp) => {
+            if (!merged.some((m) => m.name.toLowerCase() === dp.name.toLowerCase())) {
+              merged.push(dp);
+            }
+          });
+          setPatientsList(merged);
+        }
+      } catch (e) {
+        console.debug('getPatients note:', e);
+      }
+    };
+    fetchPatients();
+    return () => { active = false; };
+  }, []);
+
+  const handleSelectExistingPatient = (selectedUid) => {
+    setSelectedPatientUid(selectedUid);
+    if (!selectedUid) return;
+    const found = patientsList.find((p) => p.uid === selectedUid || p.patientId === selectedUid);
+    if (found) {
+      setPatientName(found.name);
+      setPatientId(found.patientId);
+      setPatientAge(found.age || 38);
+      setPatientGender(found.gender || 'Male');
+    }
+  };
+
+  const handlePatientNameChange = (val) => {
+    setPatientName(val);
+    const match = patientsList.find(
+      (p) => p.name.toLowerCase() === val.trim().toLowerCase()
+    );
+    if (match) {
+      setSelectedPatientUid(match.uid);
+      setPatientId(match.patientId);
+      setPatientAge(match.age || 38);
+      setPatientGender(match.gender || 'Male');
+    }
+  };
+
   const openNewModal = (type) => {
     setNewType(type);
     setPatientName('');
     setPatientId('');
+    setSelectedPatientUid('');
     setModalOpen(true);
   };
 
@@ -299,16 +365,46 @@ export default function ConsultationsHubPage() {
             </div>
             <form onSubmit={handleCreateNew}>
               <div className="modal-body">
+                {/* Registered Patient Selector */}
+                <div className="form-group mb-3">
+                  <label className="form-label flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5 font-semibold text-primary">
+                      <IconUser size={13} /> Select Registered Patient
+                    </span>
+                    <span className="text-[11px] text-muted">Or enter custom patient below</span>
+                  </label>
+                  <select
+                    className="input text-xs w-full"
+                    value={selectedPatientUid}
+                    onChange={(e) => handleSelectExistingPatient(e.target.value)}
+                  >
+                    <option value="">— Choose a registered patient from database —</option>
+                    {patientsList.map((p) => (
+                      <option key={p.uid} value={p.uid}>
+                        {p.name} ({p.patientId}) · {p.age}y, {p.gender}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="form-group">
                   <label className="form-label">Patient Full Name</label>
                   <input
                     type="text"
+                    list="registered-patients-datalist"
                     className="input"
                     required
                     placeholder="e.g. Aarav Sharma"
                     value={patientName}
-                    onChange={(e) => setPatientName(e.target.value)}
+                    onChange={(e) => handlePatientNameChange(e.target.value)}
                   />
+                  <datalist id="registered-patients-datalist">
+                    {patientsList.map((p) => (
+                      <option key={p.uid} value={p.name}>
+                        {p.patientId} · {p.age}y {p.gender}
+                      </option>
+                    ))}
+                  </datalist>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
