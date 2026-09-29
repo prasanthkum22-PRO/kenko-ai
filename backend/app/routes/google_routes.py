@@ -38,11 +38,13 @@ def _build_auth_url_handler(
     return_url: Optional[str],
     consultation_id: Optional[str],
     appointment_id: Optional[str],
-    current_user: User,
+    user_id: Optional[str] = None,
+    current_user: Optional[User] = None,
 ) -> GoogleAuthUrlResponse:
     """Core logic to generate Google OAuth 2.0 authorization URL."""
+    uid = (current_user.id if current_user else None) or user_id or "doctor_user"
     res = google_oauth_service.generate_auth_url(
-        user_id=current_user.id,
+        user_id=uid,
         return_url=return_url,
         consultation_id=consultation_id,
         appointment_id=appointment_id,
@@ -165,9 +167,33 @@ def get_google_auth_url(
     return_url: Optional[str] = Query(None),
     consultation_id: Optional[str] = Query(None),
     appointment_id: Optional[str] = Query(None),
-    current_user: User = Depends(require_authenticated_user),
+    user_id: Optional[str] = Query(None),
+    current_user: Optional[User] = Depends(get_current_user),
 ):
-    return _build_auth_url_handler(return_url, consultation_id, appointment_id, current_user)
+    return _build_auth_url_handler(return_url, consultation_id, appointment_id, user_id, current_user)
+
+
+@router.get("/login", summary="Direct browser redirect to Google OAuth consent screen")
+def direct_google_login(
+    return_url: Optional[str] = Query(None),
+    consultation_id: Optional[str] = Query(None),
+    appointment_id: Optional[str] = Query(None),
+    user_id: Optional[str] = Query(None),
+    current_user: Optional[User] = Depends(get_current_user),
+):
+    uid = (current_user.id if current_user else None) or user_id or "doctor_user"
+    res = google_oauth_service.generate_auth_url(
+        user_id=uid,
+        return_url=return_url,
+        consultation_id=consultation_id,
+        appointment_id=appointment_id,
+    )
+    if res.get("auth_url"):
+        return RedirectResponse(url=res["auth_url"], status_code=status.HTTP_302_FOUND)
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={"error": "GOOGLE_OAUTH_NOT_CONFIGURED", "message": "Google OAuth is not configured on the backend."},
+    )
 
 
 @router.get("/callback", summary="Google OAuth 2.0 Callback (GET redirect from Google)")
@@ -226,9 +252,21 @@ def get_auth_google_url(
     return_url: Optional[str] = Query(None),
     consultation_id: Optional[str] = Query(None),
     appointment_id: Optional[str] = Query(None),
-    current_user: User = Depends(require_authenticated_user),
+    user_id: Optional[str] = Query(None),
+    current_user: Optional[User] = Depends(get_current_user),
 ):
-    return _build_auth_url_handler(return_url, consultation_id, appointment_id, current_user)
+    return _build_auth_url_handler(return_url, consultation_id, appointment_id, user_id, current_user)
+
+
+@auth_google_router.get("/login", summary="Direct browser redirect to Google OAuth (auth alias)")
+def direct_auth_google_login(
+    return_url: Optional[str] = Query(None),
+    consultation_id: Optional[str] = Query(None),
+    appointment_id: Optional[str] = Query(None),
+    user_id: Optional[str] = Query(None),
+    current_user: Optional[User] = Depends(get_current_user),
+):
+    return direct_google_login(return_url, consultation_id, appointment_id, user_id, current_user)
 
 
 @auth_google_router.get("/callback", summary="Google OAuth Callback (auth alias GET)")

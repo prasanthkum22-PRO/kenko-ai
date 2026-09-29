@@ -698,25 +698,36 @@ export default function GoogleMeetCard({
           {isNotCreated && (
             <div className="flex flex-col items-center gap-4 py-4 w-full max-w-md">
               {isDoctor ? (
-                !authStatus.is_connected ? (
+                apiDiagnosticError ? (
+                  /* CASE 0: Telehealth API unavailable / HTML returned */
+                  <div className="flex flex-col items-center gap-3 w-full animate-fade-in">
+                    <div className="flex items-center gap-2 text-sm text-red-400 font-semibold">
+                      <span className="status-dot" style={{ background: '#ef4444' }} />
+                      <span>Telehealth API is unavailable</span>
+                    </div>
+                    <p className="text-xs text-muted max-w-sm leading-relaxed">
+                      {apiDiagnosticError.message || 'The configured API endpoint returned an invalid response. Ensure the FastAPI backend server is running and reachable.'}
+                    </p>
+                    <button
+                      type="button"
+                      className="btn btn-secondary w-full max-w-xs flex items-center justify-center gap-2 mt-1"
+                      style={{ minHeight: '42px', fontSize: '0.9rem', fontWeight: 600 }}
+                      onClick={handleRefreshStatus}
+                      disabled={refreshing}
+                    >
+                      <IconRefresh size={16} className={refreshing ? 'animate-spin' : ''} />
+                      <span>{refreshing ? 'Retrying...' : 'Retry Connection'}</span>
+                    </button>
+                  </div>
+                ) : !authStatus.checked ? (
+                  /* CASE 0.5: Checking Google status */
+                  <div className="flex flex-col items-center gap-3 w-full py-4 animate-fade-in">
+                    <span className="spinner" style={{ width: 28, height: 28 }} />
+                    <div className="text-xs text-muted">Checking Google connection status...</div>
+                  </div>
+                ) : !authStatus.is_connected ? (
                   /* CASE 1: Google not connected */
                   <div className="flex flex-col items-center gap-3 w-full animate-fade-in">
-                    {apiDiagnosticError && (
-                      <div className="w-full p-3 rounded-lg border border-red-500/30 bg-red-950/20 text-xs text-left mb-1">
-                        <div className="flex items-center justify-between text-red-400 font-semibold mb-1">
-                          <span>[{apiDiagnosticError.code}] Backend Server Notice</span>
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-xs text-xs text-primary hover:underline p-0 h-auto"
-                            onClick={handleRefreshStatus}
-                            disabled={refreshing}
-                          >
-                            Retry
-                          </button>
-                        </div>
-                        <p className="text-muted leading-relaxed">{apiDiagnosticError.message}</p>
-                      </div>
-                    )}
                     <div className="flex items-center gap-2 text-sm text-amber-500 font-semibold">
                       <span className="status-dot" style={{ background: '#f59e0b' }} />
                       <span>Google account required</span>
