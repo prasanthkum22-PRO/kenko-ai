@@ -472,11 +472,20 @@ async def create_appointment_meet(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"success": False, "error": "FORBIDDEN", "message": "Only the assigned doctor can create the meeting."},
         )
-    if role == "DOCTOR" and appointment.doctor_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"success": False, "error": "FORBIDDEN"},
+
+    # For doctors: allow if their ID matches, OR if the appointment uses a default/legacy doctor ID
+    LEGACY_DOCTOR_IDS = {"dr_01", "dr_02", "dr_03", "dr_04", "dr_05", "dr_06", "dr_default_01", "dr_aarav"}
+    if role in ("DOCTOR", "DOCTOR_PENDING"):
+        doctor_match = (
+            appointment.doctor_id == current_user.id
+            or appointment.doctor_id in LEGACY_DOCTOR_IDS
+            or appointment.doctor_id is None
         )
+        if not doctor_match:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"success": False, "error": "FORBIDDEN"},
+            )
 
     # Validate appointment type
     apt_type = (appointment.appointment_type or "").lower()

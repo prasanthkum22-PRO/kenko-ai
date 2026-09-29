@@ -183,11 +183,6 @@ export const cancelAppointment = async (appointmentId, reason = 'Cancelled by us
   return res.data;
 };
 
-export const createAppointmentMeet = async (appointmentId) => {
-  const res = await api.post(`/api/appointments/${appointmentId}/meet`);
-  return res.data;
-};
-
 export const getAppointmentMeetStatus = async (appointmentId) => {
   const res = await api.get(`/api/appointments/${appointmentId}/meet/status`);
   return res.data;
@@ -320,6 +315,22 @@ export const getConsultationMeeting = async (consultationId) => {
 
 export const createConsultationGoogleMeet = async (consultationId) => {
   const res = await api.post(`/api/consultations/${consultationId}/google-meet`);
+  return res.data;
+};
+
+/**
+ * createAppointmentMeet — Primary endpoint for creating a real Google Meet space.
+ * POST /api/appointments/:appointmentId/meet
+ *
+ * Handles the FULL lifecycle:
+ *   1. Validates the appointment and doctor authorization
+ *   2. Creates a real Google Meet space via Google Meet REST API v2
+ *   3. Saves the meeting URI to the appointment AND the linked consultation
+ *   4. Syncs the URI to Firestore so both doctor and patient see it instantly
+ *   5. Idempotent: returns existing meeting if already created
+ */
+export const createAppointmentMeet = async (appointmentId) => {
+  const res = await api.post(`/api/appointments/${appointmentId}/meet`);
   return res.data;
 };
 

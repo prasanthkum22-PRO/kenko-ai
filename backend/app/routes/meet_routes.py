@@ -114,6 +114,7 @@ async def create_google_meet(
     user_id = current_user.id
 
     # ── Idempotency: return existing meeting if already created ──────────────
+    # Also handles firebase_sync_failed: re-attempt sync without re-creating the space
     if consultation.google_meeting_uri and consultation.meeting_status not in (
         "scheduled", "SCHEDULED", "meet_creation_failed", "MEET_CREATION_FAILED", ""
     ):

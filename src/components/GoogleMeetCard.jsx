@@ -144,7 +144,8 @@ export default function GoogleMeetCard({
 
       const cachedEmail = localStorage.getItem('kenko_doctor_google_email');
       if (cachedEmail && active) {
-        setCustomGoogleEmail(cachedEmail);
+        // Just log for now — email stored from OAuth callback, no state setter needed
+        if (import.meta.env.DEV) console.debug('[GoogleMeetCard] Cached google email:', cachedEmail);
       }
 
       try {
@@ -346,27 +347,60 @@ export default function GoogleMeetCard({
   const handleCreateMeet = async () => {
     if (!consentConfirmed) { setConsentModalOpen(true); return; }
     setMeetCreationError(null);
-    const consultId = consultation?.id || consultation?.consultation_id || appointment?.consultation_id || appointment?.id;
-    if (!consultId) {
-      toastError('No consultation identifier found.', 'Error');
+
+    // Prefer appointment ID — that endpoint handles full lifecycle:
+    // Google Meet API → Consultation creation → Firestore sync
+    const apptId = appointment?.id || consultation?.appointment_id;
+    const consultId = consultation?.id || consultation?.consultation_id || appointment?.consultation_id;
+
+    if (!apptId && !consultId) {
+      toastError('No appointment or consultation identifier found.', 'Error');
       return;
     }
 
     try {
       setLoading(true);
-      const res = await createGoogleMeet(consultId, consultation?.patient_id || appointment?.patient_id);
-      const meetUri = res?.meetingUri || res?.meetingUrl;
+      let res;
+
+      if (apptId) {
+        // Primary path: appointment-based endpoint (idempotent, full lifecycle)
+        res = await createAppointmentMeet(apptId);
+        // Normalize the response shape across different endpoint formats
+        res = {
+          meetingUri: res?.meetingUri || res?.meeting?.meetingUri || res?.meeting?.meetingUrl,
+          meetingCode: res?.meetingCode || res?.meeting?.meetingCode,
+          spaceName: res?.spaceName || res?.meeting?.spaceName,
+          consultationId: res?.consultationId,
+          ...res,
+        };
+      } else {
+        // Fallback: consultation-based endpoint
+        res = await createConsultationGoogleMeet(consultId);
+        res = {
+          meetingUri: res?.meetingUri || res?.meetingUrl,
+          meetingCode: res?.meetingCode,
+          spaceName: res?.spaceName,
+          consultationId: res?.consultationId || consultId,
+          ...res,
+        };
+      }
+
+      const meetUri = res?.meetingUri;
       const meetCode = res?.meetingCode || (meetUri ? meetUri.split('/').pop() : null);
       const spaceName = res?.spaceName || null;
+      const linkedConsultId = res?.consultationId || consultId;
 
       if (!meetUri) {
         throw new Error(res?.message || 'Google Meet URL was not returned by server.');
       }
 
-      // Update Firestore with real meeting metadata
-      const apptId = appointment?.id || consultation?.appointment_id || consultId;
-      if (apptId) {
-        await acceptAppointmentFirestore(apptId, meetUri, meetCode, spaceName).catch(() => null);
+      // Optimistically update Firestore appointment so patient sees the link immediately
+      // (backend also does this, but we do it here in case of delays)
+      const targetApptId = apptId || appointment?.id || consultation?.appointment_id;
+      if (targetApptId) {
+        try {
+          await acceptAppointmentFirestore(targetApptId, meetUri, meetCode, spaceName).catch(() => null);
+        } catch {}
       }
 
       setMeetData((prev) => ({

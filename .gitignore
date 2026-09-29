@@ -25,6 +25,10 @@ dist-ssr
 !.env.example
 *client_secret*.json
 client_secrets.json
+*service_account*.json
+*service-account*.json
+firebase-service-account.json
+
 
 # ── Python ───────────────────────────────────────────────────
 .venv/

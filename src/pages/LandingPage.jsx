@@ -31,13 +31,16 @@ export default function LandingPage() {
       <header className="kenko-nav">
         <Link to="/" className="kenko-logo">
           <div className="kenko-logo-icon">K</div>
-          <span>KENKO-AI <span style={{ color: '#38bdf8', fontWeight: 500, fontSize: '0.85em' }}>MediBridge</span></span>
+          <span>kenkoai <span style={{ color: '#38bdf8', fontWeight: 500, fontSize: '0.85em' }}>Clinical Platform</span></span>
         </Link>
 
         <nav className="kenko-nav-links">
+          <a href="#about" className="kenko-nav-link">About kenkoai</a>
           <a href="#cockpit" className="kenko-nav-link">Live Cockpit</a>
+          <a href="#telehealth" className="kenko-nav-link">Google Meet Telehealth</a>
           <a href="#features" className="kenko-nav-link">Ambient AI</a>
-          <a href="#telemetry" className="kenko-nav-link">Biometric HUD</a>
+          <Link to="/privacy" className="kenko-nav-link" style={{ color: '#94a3b8' }}>Privacy Policy</Link>
+          <Link to="/terms" className="kenko-nav-link" style={{ color: '#94a3b8' }}>Terms</Link>
           <Link to="/demo" className="kenko-nav-link" style={{ color: '#2dd4bf' }}>Interactive Demo</Link>
         </nav>
 
@@ -278,25 +281,185 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ─── FOOTER & LAUNCH STRIP ─── */}
-      <footer style={{ borderTop: '1px solid rgba(255,255,255,0.08)', padding: '3rem 2rem', textAlign: 'center', background: 'rgba(2, 6, 23, 0.6)' }}>
-        <div style={{ maxWidth: 800, margin: '0 auto' }}>
-          <h3 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#fff', marginBottom: '0.75rem' }}>
-            Experience the Future of Telehealth
-          </h3>
-          <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '1.75rem' }}>
-            HIPAA-compliant, AI-accelerated consultation suite ready for clinics, doctors, and patients.
+      {/* ─── ABOUT KENKOAI & APPLICATION PURPOSE SECTION ─── */}
+      <section id="about" style={{ padding: '4.5rem 2rem', maxWidth: 1200, margin: '0 auto' }}>
+        <div style={{ textAlign: 'center', maxWidth: 840, margin: '0 auto 3rem auto' }}>
+          <div className="section-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.9rem', borderRadius: 999, background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.25)', color: '#38bdf8', fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '1rem' }}>
+            <span className="pulse-dot"></span>
+            <span>Application Overview &amp; Purpose</span>
+          </div>
+          <h2 style={{ fontSize: '2.25rem', fontWeight: 800, letterSpacing: '-0.025em', color: '#fff', margin: '0 0 1rem 0' }}>
+            What is <span style={{ color: '#38bdf8' }}>kenkoai</span>?
+          </h2>
+          <p style={{ color: '#94a3b8', fontSize: '1.05rem', lineHeight: 1.7, margin: 0 }}>
+            <strong>kenkoai</strong> is an enterprise-grade clinical intelligence and telehealth consultation platform designed to empower healthcare providers and streamline patient care. By integrating seamless video consultations with ambient medical transcription and structured electronic health records (EHR), kenkoai eliminates administrative documentation overhead so clinicians can focus on what matters most — their patients.
           </p>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem' }}>
-            <Link to="/demo" className="btn-primary-pill" style={{ padding: '0.75rem 1.75rem', fontSize: '0.95rem' }}>
-              Launch 1-Click Interactive Demo
-            </Link>
-            <Link to="/login" className="btn-ghost-sm" style={{ padding: '0.75rem 1.5rem', fontSize: '0.95rem' }}>
-              Clinician Login
-            </Link>
+        </div>
+
+        {/* 3 Core Pillars */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem', marginBottom: '3rem' }}>
+          <div style={{ background: 'rgba(15, 23, 42, 0.75)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: '2rem' }}>
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1.25rem', fontSize: '1.25rem', fontWeight: 700 }}>
+              1
+            </div>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#fff', marginBottom: '0.75rem' }}>
+              Google Meet Telehealth Integration
+            </h3>
+            <p style={{ color: '#94a3b8', fontSize: '0.9rem', lineHeight: 1.6 }}>
+              Physicians securely authenticate using Google OAuth to instantly generate dedicated Google Meet video consultation spaces directly from the clinical schedule, enabling high-definition, encrypted doctor-patient encounters without third-party plugins.
+            </p>
+          </div>
+
+          <div style={{ background: 'rgba(15, 23, 42, 0.75)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: '2rem' }}>
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(45, 212, 191, 0.15)', color: '#2dd4bf', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1.25rem', fontSize: '1.25rem', fontWeight: 700 }}>
+              2
+            </div>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#fff', marginBottom: '0.75rem' }}>
+              Ambient Medical Transcription &amp; SOAP Notes
+            </h3>
+            <p style={{ color: '#94a3b8', fontSize: '0.9rem', lineHeight: 1.6 }}>
+              Real-time, HIPAA-aware speech recognition automatically transcribes clinical dialogues, extracting critical symptoms, diagnoses, vitals, and treatment plans into standardized Subjective, Objective, Assessment, and Plan (SOAP) records.
+            </p>
+          </div>
+
+          <div style={{ background: 'rgba(15, 23, 42, 0.75)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: '2rem' }}>
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(251, 191, 36, 0.15)', color: '#fbbf24', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1.25rem', fontSize: '1.25rem', fontWeight: 700 }}>
+              3
+            </div>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#fff', marginBottom: '0.75rem' }}>
+              Connected Care &amp; Follow-Up Intelligence
+            </h3>
+            <p style={{ color: '#94a3b8', fontSize: '0.9rem', lineHeight: 1.6 }}>
+              Generates digital prescriptions with contraindication safety checks, routes orders to pharmacies and laboratories, and schedules automated patient condition check-ins and recovery timelines.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── GOOGLE MEET TELEHEALTH SECTION ─── */}
+      <section id="telehealth" style={{ padding: '4rem 2rem', background: 'rgba(15, 23, 42, 0.5)', borderTop: '1px solid rgba(255,255,255,0.06)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div style={{ maxWidth: 1000, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '2.5rem', alignItems: 'center' }}>
+          <div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.35rem 0.85rem', borderRadius: 999, background: 'rgba(34, 197, 94, 0.12)', border: '1px solid rgba(34, 197, 94, 0.25)', color: '#22c55e', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', marginBottom: '1rem' }}>
+              <span>Google Meet REST API v2 Integration</span>
+            </div>
+            <h2 style={{ fontSize: '2rem', fontWeight: 800, color: '#fff', marginBottom: '1rem', lineHeight: 1.2 }}>
+              Seamless, One-Click Google Meet Teleconsultations
+            </h2>
+            <p style={{ color: '#94a3b8', fontSize: '0.95rem', lineHeight: 1.7, marginBottom: '1.5rem' }}>
+              <strong>kenkoai</strong> connects with the official Google Meet REST API v2 to allow authorized clinicians to schedule, launch, and manage patient video calls directly inside the workspace.
+            </p>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem', color: '#cbd5e1', fontSize: '0.875rem' }}>
+              <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span style={{ color: '#2dd4bf' }}>✔</span> Instant space provisioning via <code>meetings.space.created</code>
+              </li>
+              <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span style={{ color: '#2dd4bf' }}>✔</span> Automatic patient join links sent via email and SMS
+              </li>
+              <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span style={{ color: '#2dd4bf' }}>✔</span> Full adherence to Google API Services User Data Policy
+              </li>
+            </ul>
+          </div>
+          <div style={{ background: 'rgba(2, 6, 23, 0.8)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: 16, padding: '1.75rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '1rem', marginBottom: '1rem' }}>
+              <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#ef4444' }}></div>
+              <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#eab308' }}></div>
+              <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#22c55e' }}></div>
+              <span style={{ fontSize: '0.75rem', color: '#64748b', marginLeft: 'auto' }}>Google Meet REST API v2</span>
+            </div>
+            <div style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: '#38bdf8', lineHeight: 1.6 }}>
+              <p style={{ color: '#94a3b8', margin: '0 0 0.5rem 0' }}>// Provision Telehealth Space</p>
+              <p style={{ margin: 0 }}>POST /v2/spaces</p>
+              <p style={{ color: '#2dd4bf', margin: '0.25rem 0' }}>&#123; "config": &#123; "accessType": "TRUSTED" &#125; &#125;</p>
+              <p style={{ color: '#a855f7', margin: '0.5rem 0 0 0' }}>✔ Meeting Space: meet.google.com/xyz-med-kenko</p>
+              <p style={{ color: '#64748b', fontSize: '0.75rem', margin: '0.25rem 0 0 0' }}>Status: READY • Doctor &amp; Patient Connected</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── FOOTER & LAUNCH STRIP ─── */}
+      <footer style={{ borderTop: '1px solid rgba(255,255,255,0.08)', padding: '4rem 2rem 2rem 2rem', background: 'rgba(2, 6, 23, 0.9)' }}>
+        <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '2.5rem', marginBottom: '3rem', textAlign: 'left' }}>
+            {/* Column 1: Brand & Purpose */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                <div style={{ width: 28, height: 28, borderRadius: 8, background: 'linear-gradient(135deg, #0ea5e9, #0284c7)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 800, fontSize: '0.85rem' }}>K</div>
+                <span style={{ fontSize: '1.2rem', fontWeight: 800, color: '#fff' }}>kenkoai</span>
+              </div>
+              <p style={{ color: '#94a3b8', fontSize: '0.85rem', lineHeight: 1.6, margin: 0 }}>
+                Next-generation clinical intelligence platform providing ambient medical transcription, automated SOAP documentation, and Google Meet telehealth integration for modern healthcare.
+              </p>
+            </div>
+
+            {/* Column 2: Navigation & Workspaces */}
+            <div>
+              <h4 style={{ color: '#fff', fontSize: '0.9rem', fontWeight: 700, marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Platform</h4>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.85rem' }}>
+                <li><a href="#about" style={{ color: '#94a3b8', textDecoration: 'none' }}>About kenkoai</a></li>
+                <li><a href="#telehealth" style={{ color: '#94a3b8', textDecoration: 'none' }}>Google Meet Telehealth</a></li>
+                <li><a href="#cockpit" style={{ color: '#94a3b8', textDecoration: 'none' }}>Live Cockpit HUD</a></li>
+                <li><Link to="/demo" style={{ color: '#2dd4bf', textDecoration: 'none' }}>Interactive Demo</Link></li>
+                <li><Link to="/login" style={{ color: '#94a3b8', textDecoration: 'none' }}>Clinician Portal</Link></li>
+              </ul>
+            </div>
+
+            {/* Column 3: Legal, Privacy & Compliance */}
+            <div>
+              <h4 style={{ color: '#fff', fontSize: '0.9rem', fontWeight: 700, marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Legal &amp; Compliance</h4>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.85rem' }}>
+                <li>
+                  <Link to="/privacy" style={{ color: '#38bdf8', textDecoration: 'underline', fontWeight: 600 }}>
+                    Privacy Policy
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/terms" style={{ color: '#38bdf8', textDecoration: 'underline', fontWeight: 600 }}>
+                    Terms of Service
+                  </Link>
+                </li>
+                <li>
+                  <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer" style={{ color: '#94a3b8', textDecoration: 'none' }}>
+                    Google API User Data Policy ↗
+                  </a>
+                </li>
+                <li>
+                  <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer" style={{ color: '#94a3b8', textDecoration: 'none' }}>
+                    Google Account Permissions ↗
+                  </a>
+                </li>
+              </ul>
+            </div>
+
+            {/* Column 4: Contact & Security */}
+            <div>
+              <h4 style={{ color: '#fff', fontSize: '0.9rem', fontWeight: 700, marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Contact Support</h4>
+              <p style={{ color: '#94a3b8', fontSize: '0.85rem', lineHeight: 1.6, margin: '0 0 0.5rem 0' }}>
+                Security, Compliance &amp; Verification Team:
+              </p>
+              <p style={{ color: '#38bdf8', fontSize: '0.85rem', fontWeight: 600, margin: 0 }}>
+                support@kenkoai.com
+              </p>
+              <p style={{ color: '#64748b', fontSize: '0.75rem', marginTop: '0.5rem' }}>
+                Response time: &lt; 24 hours
+              </p>
+            </div>
+          </div>
+
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '1.5rem', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', fontSize: '0.8rem', color: '#64748b' }}>
+            <div>
+              © 2026 <strong>kenkoai</strong>. All Rights Reserved. Built for secure, connected clinical care.
+            </div>
+            <div style={{ display: 'flex', gap: '1.5rem' }}>
+              <Link to="/privacy" style={{ color: '#94a3b8', textDecoration: 'underline' }}>Privacy Policy</Link>
+              <Link to="/terms" style={{ color: '#94a3b8', textDecoration: 'underline' }}>Terms of Service</Link>
+            </div>
           </div>
         </div>
       </footer>
     </div>
   );
 }
+
