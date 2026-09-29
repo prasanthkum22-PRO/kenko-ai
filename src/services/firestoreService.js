@@ -531,6 +531,48 @@ export const declineAppointmentFirestore = async (appointmentId, declineReason =
   });
 };
 
+export const subscribeAppointment = (appointmentId, callback) => {
+  if (!appointmentId) return () => {};
+  try {
+    const aptRef = doc(db, 'appointments', appointmentId);
+    return onSnapshot(
+      aptRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          callback({ id: docSnap.id, ...docSnap.data() });
+        }
+      },
+      (err) => {
+        console.warn('[Firestore] subscribeAppointment error:', err?.message);
+      }
+    );
+  } catch (e) {
+    console.warn('[Firestore] subscribeAppointment init error:', e?.message);
+    return () => {};
+  }
+};
+
+export const subscribeConsultation = (consultationId, callback) => {
+  if (!consultationId) return () => {};
+  try {
+    const consRef = doc(db, 'consultations', consultationId);
+    return onSnapshot(
+      consRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          callback({ id: docSnap.id, ...docSnap.data() });
+        }
+      },
+      (err) => {
+        console.warn('[Firestore] subscribeConsultation error:', err?.message);
+      }
+    );
+  } catch (e) {
+    console.warn('[Firestore] subscribeConsultation init error:', e?.message);
+    return () => {};
+  }
+};
+
 export const cancelAppointmentFirestore = async (appointmentId, reason = 'Cancelled by user') => {
   if (!appointmentId) return;
   const aptRef = doc(db, 'appointments', appointmentId);

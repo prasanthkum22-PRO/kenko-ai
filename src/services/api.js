@@ -6,16 +6,19 @@ export const getApiBaseUrl = () => {
     import.meta.env.VITE_API_URL ||
     import.meta.env.VITE_BACKEND_URL;
 
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim() !== '') {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+
   if (typeof window !== 'undefined' && window.location) {
     const isLocal =
       window.location.hostname === 'localhost' ||
       window.location.hostname === '127.0.0.1';
     if (!isLocal) {
-      if (envUrl && envUrl.startsWith('https://')) return envUrl.replace(/\/+$/, '');
       return window.location.origin;
     }
   }
-  return (envUrl || 'http://localhost:8000').replace(/\/+$/, '');
+  return 'http://localhost:8000';
 };
 
 // ─── Axios Instance ──────────────────────────────────────────

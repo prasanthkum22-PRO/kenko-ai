@@ -69,10 +69,48 @@ async def create_google_meet(
     """
     request_id = f"req_{uuid.uuid4().hex[:10]}"
     consultation_id = req.consultationId or req.consultation_id
+    appointment_id = req.appointmentId or req.appointment_id
+
+    if not consultation_id and appointment_id:
+        appt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+        if not appt:
+            return format_error_response(
+                code="APPOINTMENT_NOT_FOUND",
+                message=f"Appointment '{appointment_id}' not found.",
+                request_id=request_id,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        if appt.consultation_id:
+            consultation_id = appt.consultation_id
+        else:
+            consultation = db.query(Consultation).filter(Consultation.appointment_id == appointment_id).first()
+            if consultation:
+                consultation_id = consultation.id
+                appt.consultation_id = consultation.id
+                db.commit()
+            else:
+                new_cons_id = str(uuid.uuid4())
+                consultation = Consultation(
+                    id=new_cons_id,
+                    appointment_id=appointment_id,
+                    doctor_id=appt.doctor_id or current_user.id,
+                    patient_id=appt.patient_id,
+                    patient_name=appt.patient_name,
+                    consultation_type=appt.appointment_type or "video",
+                    status="in_progress",
+                    meeting_status="scheduled",
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                )
+                db.add(consultation)
+                appt.consultation_id = new_cons_id
+                db.commit()
+                consultation_id = new_cons_id
+
     if not consultation_id:
         return format_error_response(
             code="INVALID_REQUEST",
-            message="consultationId is required.",
+            message="Either consultationId or appointmentId is required.",
             request_id=request_id,
             status_code=status.HTTP_400_BAD_REQUEST,
         )

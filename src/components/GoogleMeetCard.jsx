@@ -16,6 +16,8 @@ import {
   getAppointmentFirestore,
   getConsultationFirestore,
   updateAppointmentFirestore,
+  subscribeAppointment,
+  subscribeConsultation,
 } from '../services/firestoreService';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
@@ -232,69 +234,50 @@ export default function GoogleMeetCard({
     }
   }, [consultation, appointment]);
 
-  // Short-interval polling after mount if meeting not ready yet (2s, 4s, 6s, 8s)
+  // Realtime Firestore listeners for instant, zero-delay doctor & patient synchronization
   useEffect(() => {
-    if (meetData.meetingUri) return;
     const targetConsultId = consultation?.id || consultation?.consultation_id || appointment?.consultation_id;
     const targetApptId = appointment?.id || consultation?.appointment_id;
-    if (!targetConsultId && !targetApptId) return;
 
-    let cancelled = false;
-    const delays = [2000, 4000, 6000, 8000];
-    const timers = [];
+    const unsubAppt = targetApptId
+      ? subscribeAppointment(targetApptId, (aptFs) => {
+          const mUri = aptFs?.googleMeetingUri || aptFs?.googleMeet?.meetingUri || aptFs?.meeting?.meetingUrl;
+          if (mUri) {
+            setMeetData((prev) => ({
+              ...prev,
+              meetingUri: mUri,
+              meetingCode: aptFs?.googleMeetingCode || aptFs?.googleMeet?.meetingCode || mUri.split('/').pop(),
+              spaceName: aptFs?.googleSpaceName || aptFs?.googleMeet?.spaceName || prev.spaceName,
+              meetingStatus: 'meet_ready',
+            }));
+            if (onStatusChange) onStatusChange('meet_ready');
+            if (onConsultationUpdated) onConsultationUpdated();
+          }
+        })
+      : () => {};
 
-    delays.forEach((delay) => {
-      const t = setTimeout(async () => {
-        if (cancelled) return;
-        try {
-          if (targetConsultId) {
-            const mRes = await getConsultationMeeting(targetConsultId).catch((err) => {
-              if (err?.code === 'BACKEND_RETURNED_HTML' || err?.code === 'BACKEND_UNAVAILABLE') {
-                cancelled = true;
-              }
-              return null;
-            });
-            if (mRes?.meeting?.meetingUrl || mRes?.meetingUri || mRes?.meetingUrl) {
-              const uri = mRes.meeting?.meetingUrl || mRes.meetingUri || mRes.meetingUrl;
-              const code = mRes.meeting?.meetingCode || mRes.meetingCode;
-              const space = mRes.meeting?.spaceName || mRes.spaceName;
-              setMeetData((prev) => ({
-                ...prev,
-                meetingUri: uri,
-                meetingCode: code || (uri ? uri.split('/').pop() : prev.meetingCode),
-                spaceName: space || prev.spaceName,
-                meetingStatus: 'meet_ready',
-              }));
-              if (onStatusChange) onStatusChange('meet_ready');
-              if (onConsultationUpdated) onConsultationUpdated();
-              return;
-            }
+    const unsubCons = targetConsultId
+      ? subscribeConsultation(targetConsultId, (consFs) => {
+          const mUri = consFs?.google_meeting_uri || consFs?.googleMeetingUri || consFs?.meetingUri || consFs?.meeting?.meetingUrl;
+          if (mUri) {
+            setMeetData((prev) => ({
+              ...prev,
+              meetingUri: mUri,
+              meetingCode: consFs?.google_meeting_code || consFs?.googleMeetingCode || mUri.split('/').pop(),
+              spaceName: consFs?.google_space_name || consFs?.googleSpaceName || prev.spaceName,
+              meetingStatus: 'meet_ready',
+            }));
+            if (onStatusChange) onStatusChange('meet_ready');
+            if (onConsultationUpdated) onConsultationUpdated();
           }
-          if (targetApptId) {
-            const aptFs = await getAppointmentFirestore(targetApptId).catch(() => null);
-            const mUri = aptFs?.googleMeetingUri || aptFs?.googleMeet?.meetingUri || aptFs?.meeting?.meetingUrl;
-            if (mUri) {
-              setMeetData((prev) => ({
-                ...prev,
-                meetingUri: mUri,
-                meetingCode: aptFs?.googleMeetingCode || aptFs?.googleMeet?.meetingCode || aptFs?.meeting?.meetingCode || mUri.split('/').pop(),
-                spaceName: aptFs?.googleSpaceName || aptFs?.googleMeet?.spaceName || prev.spaceName,
-                meetingStatus: 'meet_ready',
-              }));
-              if (onStatusChange) onStatusChange('meet_ready');
-              if (onConsultationUpdated) onConsultationUpdated();
-            }
-          }
-        } catch {}
-      }, delay);
-      timers.push(t);
-    });
+        })
+      : () => {};
 
     return () => {
-      cancelled = true;
-      timers.forEach(clearTimeout);
+      unsubAppt();
+      unsubCons();
     };
-  }, [consultation?.id, appointment?.id, Boolean(meetData.meetingUri)]);
+  }, [consultation?.id, appointment?.id]);
 
   const handleConnectGoogle = async () => {
     const currentUrl = window.location.href;

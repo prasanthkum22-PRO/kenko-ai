@@ -145,6 +145,8 @@ app.include_router(role_dashboards_router)
 app.include_router(followups_router)
 app.include_router(demo_router)
 app.include_router(google_router)
+from app.routes.google_routes import auth_google_router
+app.include_router(auth_google_router)
 app.include_router(meet_router)
 app.include_router(transcription_router)
 app.include_router(doctor_router)
@@ -152,8 +154,33 @@ app.include_router(clinical_workspace_router)
 app.include_router(appointment_router)
 
 
-
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+# ── JSON Error Handlers for API endpoints ─────────────────────
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request, exc):
+    if request.url.path.startswith("/api/") or request.url.path in ("/api", "/health"):
+        detail = exc.detail
+        msg = detail if isinstance(detail, str) else detail.get("message", str(detail))
+        code = detail.get("error", "HTTP_ERROR") if isinstance(detail, dict) else f"HTTP_{exc.status_code}"
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"success": False, "error": {"code": code, "message": msg, "status": exc.status_code}},
+        )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    if request.url.path.startswith("/api/"):
+        return JSONResponse(
+            status_code=422,
+            content={"success": False, "error": {"code": "VALIDATION_ERROR", "message": "Invalid request payload", "details": exc.errors()}},
+        )
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
 
 # ── Health Checks ─────────────────────────────────────────────
 @app.get("/health", tags=["Health"])

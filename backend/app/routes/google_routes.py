@@ -1,6 +1,7 @@
 """
-MediBridge AI — Google OAuth Routes
+MediBridge AI / KENKO-AI — Google OAuth Routes
 Handles authorization URL generation, OAuth code callback, connection status, and disconnect.
+Provides endpoints under both /api/google and /api/auth/google for frontend compatibility.
 """
 
 import os
@@ -9,8 +10,8 @@ import logging
 import urllib.parse
 from typing import Optional, Dict, Any
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -25,8 +26,7 @@ from app.services.google_oauth_service import google_oauth_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/google", tags=["Google OAuth"])
-
-# Removed import of google_meet_service — Meet creation is not done in OAuth callback.
+auth_google_router = APIRouter(prefix="/api/auth/google", tags=["Google OAuth (Auth Alias)"])
 
 
 class GoogleOAuthCallbackBody(BaseModel):
@@ -34,17 +34,13 @@ class GoogleOAuthCallbackBody(BaseModel):
     state: Optional[str] = None
 
 
-@router.get("/auth", response_model=GoogleAuthUrlResponse, summary="Get Google OAuth Authorization URL")
-def get_google_auth_url(
-    return_url: Optional[str] = Query(None),
-    consultation_id: Optional[str] = Query(None),
-    appointment_id: Optional[str] = Query(None),
-    current_user: User = Depends(require_authenticated_user),
-):
-    """
-    Returns the Google OAuth 2.0 authorization URL.
-    Requires authentication: user_id is taken from the JWT, never defaulted.
-    """
+def _build_auth_url_handler(
+    return_url: Optional[str],
+    consultation_id: Optional[str],
+    appointment_id: Optional[str],
+    current_user: User,
+) -> GoogleAuthUrlResponse:
+    """Core logic to generate Google OAuth 2.0 authorization URL."""
     res = google_oauth_service.generate_auth_url(
         user_id=current_user.id,
         return_url=return_url,
@@ -69,11 +65,7 @@ async def _process_oauth_callback(
     state: Optional[str],
     db: Session,
 ) -> Dict[str, Any]:
-    """
-    Core OAuth callback handler: ONLY exchanges code for tokens and stores credentials.
-    Does NOT create a Google Meet space here.
-    Meet creation must be triggered explicitly by doctor via POST /api/meet/create.
-    """
+    """Core OAuth callback handler: exchanges code for tokens and stores credentials securely."""
     res = await google_oauth_service.exchange_code(code=code, state=state or "", db=db)
     return {
         "success": True,
@@ -82,21 +74,16 @@ async def _process_oauth_callback(
         "return_url": res.get("return_url"),
         "consultation_id": res.get("consultation_id"),
         "appointment_id": res.get("appointment_id"),
-        # No meetingUri — Meet is created only when doctor clicks Create Meeting
     }
 
 
-@router.get("/callback", summary="Google OAuth 2.0 Callback (GET redirect from Google)")
-async def google_oauth_callback_get(
-    code: Optional[str] = Query(None),
-    state: Optional[str] = Query(None),
-    error: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-):
-    """
-    GET callback endpoint called by Google Accounts redirect.
-    Exchanges code, creates Meet space, syncs Firestore, and redirects back to Doctor Consultation page.
-    """
+async def _handle_callback_get(
+    code: Optional[str],
+    state: Optional[str],
+    error: Optional[str],
+    db: Session,
+) -> RedirectResponse:
+    """GET callback endpoint called by Google Accounts browser redirect."""
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
     default_redirect = f"{frontend_url}/consultations"
 
@@ -110,7 +97,7 @@ async def google_oauth_callback_get(
     if not code:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing Google OAuth authorization code in callback.",
+            detail={"error": "INVALID_CALLBACK", "message": "Missing Google OAuth authorization code in callback."},
         )
 
     try:
@@ -121,7 +108,6 @@ async def google_oauth_callback_get(
             "google_auth=success",
             f"email={urllib.parse.quote(data.get('email') or '')}",
         ]
-        # Note: no meet_created param — Meet is created only by explicit doctor action
         final_url = f"{target_url}{sep}{'&'.join(redirect_params)}"
         logger.info(f"[OAuth Callback GET] Redirecting to: {final_url}")
         return RedirectResponse(url=final_url, status_code=status.HTTP_302_FOUND)
@@ -140,30 +126,22 @@ async def google_oauth_callback_get(
         )
 
 
-@router.post("/callback", summary="Google OAuth 2.0 Callback (POST from frontend SPA)")
-async def google_oauth_callback_post(
-    body: GoogleOAuthCallbackBody,
-    db: Session = Depends(get_db),
-):
-    """
-    POST callback endpoint used by frontend callback component when SPA captures redirect.
-    """
-    if not body.code:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing authorization code.")
-    try:
-        data = await _process_oauth_callback(code=body.code, state=body.state, db=db)
-        return data
-    except Exception as exc:
-        logger.error(f"[OAuth Callback POST] Processing error: {exc}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
-
-
-@router.get("/status", response_model=GoogleAuthStatusResponse, summary="Check Google OAuth connection status")
-def get_google_connection_status(
-    current_user: User = Depends(require_authenticated_user),
-    db: Session = Depends(get_db),
-):
-    """Checks if the logged-in doctor has connected their Google account. Requires authentication."""
+def _handle_connection_status(
+    current_user: Optional[User],
+    db: Session,
+) -> GoogleAuthStatusResponse:
+    """Checks if the doctor has connected their Google account."""
+    if not current_user:
+        return GoogleAuthStatusResponse(
+            connected=False,
+            is_connected=False,
+            googleEmail=None,
+            email=None,
+            status="GOOGLE_NOT_CONNECTED",
+            scopes=[],
+            expires_at=None,
+            is_mock=False,
+        )
     status_info = google_oauth_service.get_connection_status(user_id=current_user.id, db=db)
     is_conn = bool(status_info.get("is_connected", False))
     doc_email = status_info.get("email")
@@ -179,11 +157,109 @@ def get_google_connection_status(
     )
 
 
+# ─── Primary Routes: /api/google/* ──────────────────────────────────────────
+
+@router.get("/auth", response_model=GoogleAuthUrlResponse, summary="Get Google OAuth Authorization URL")
+@router.get("/authorize", response_model=GoogleAuthUrlResponse, summary="Get Google OAuth Authorization URL (alias)")
+def get_google_auth_url(
+    return_url: Optional[str] = Query(None),
+    consultation_id: Optional[str] = Query(None),
+    appointment_id: Optional[str] = Query(None),
+    current_user: User = Depends(require_authenticated_user),
+):
+    return _build_auth_url_handler(return_url, consultation_id, appointment_id, current_user)
+
+
+@router.get("/callback", summary="Google OAuth 2.0 Callback (GET redirect from Google)")
+async def google_oauth_callback_get(
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    return await _handle_callback_get(code, state, error, db)
+
+
+@router.post("/callback", summary="Google OAuth 2.0 Callback (POST from frontend SPA)")
+async def google_oauth_callback_post(
+    body: GoogleOAuthCallbackBody,
+    db: Session = Depends(get_db),
+):
+    if not body.code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "INVALID_CALLBACK", "message": "Missing authorization code."},
+        )
+    try:
+        data = await _process_oauth_callback(code=body.code, state=body.state, db=db)
+        return data
+    except Exception as exc:
+        logger.error(f"[OAuth Callback POST] Processing error: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "OAUTH_EXCHANGE_FAILED", "message": str(exc)},
+        )
+
+
+@router.get("/status", response_model=GoogleAuthStatusResponse, summary="Check Google OAuth connection status")
+def get_google_connection_status(
+    current_user: Optional[User] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return _handle_connection_status(current_user, db)
+
+
 @router.post("/disconnect", summary="Disconnect Google account")
 async def disconnect_google_account(
     current_user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    """Revokes token and removes stored credentials for the authenticated user."""
     success_result = await google_oauth_service.disconnect(user_id=current_user.id, db=db)
     return {"success": success_result, "message": "Google account disconnected."}
+
+
+# ─── Alias Routes: /api/auth/google/* ───────────────────────────────────────
+
+@auth_google_router.get("", response_model=GoogleAuthUrlResponse, summary="Get Google OAuth Authorization URL (auth alias)")
+@auth_google_router.get("/auth", response_model=GoogleAuthUrlResponse, summary="Get Google OAuth Authorization URL (auth alias)")
+def get_auth_google_url(
+    return_url: Optional[str] = Query(None),
+    consultation_id: Optional[str] = Query(None),
+    appointment_id: Optional[str] = Query(None),
+    current_user: User = Depends(require_authenticated_user),
+):
+    return _build_auth_url_handler(return_url, consultation_id, appointment_id, current_user)
+
+
+@auth_google_router.get("/callback", summary="Google OAuth Callback (auth alias GET)")
+async def auth_google_callback_get(
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    return await _handle_callback_get(code, state, error, db)
+
+
+@auth_google_router.post("/callback", summary="Google OAuth Callback (auth alias POST)")
+async def auth_google_callback_post(
+    body: GoogleOAuthCallbackBody,
+    db: Session = Depends(get_db),
+):
+    return await google_oauth_callback_post(body, db)
+
+
+@auth_google_router.get("/status", response_model=GoogleAuthStatusResponse, summary="Check Google OAuth status (auth alias)")
+def auth_google_connection_status(
+    current_user: Optional[User] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return _handle_connection_status(current_user, db)
+
+
+@auth_google_router.post("/disconnect", summary="Disconnect Google account (auth alias)")
+async def auth_google_disconnect(
+    current_user: User = Depends(require_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    return await disconnect_google_account(current_user, db)
