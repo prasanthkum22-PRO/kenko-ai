@@ -7,6 +7,7 @@ services:
     envVars:
       - key: APP_ENV
         value: production
+      # ── Google OAuth (set these in Render dashboard — never commit secrets) ──
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
@@ -15,5 +16,18 @@ services:
         value: https://kenko-ai-1.onrender.com/api/google/callback
       - key: FRONTEND_URL
         value: https://kenko-ai-1.onrender.com
+      # ── Auth ──────────────────────────────────────────────────────────────────
       - key: JWT_SECRET
         generateValue: true
+      # ── Database ──────────────────────────────────────────────────────────────
+      - key: DATABASE_URL
+        value: sqlite:///./kenko_clinical.db
+      # ── CORS ──────────────────────────────────────────────────────────────────
+      - key: ALLOWED_ORIGINS
+        value: https://kenko-ai-1.onrender.com,http://localhost:5173,http://localhost:3000
+      # ── CRITICAL: Vite API URL baked into the production frontend bundle ──────
+      # This tells the React app where to send API requests.
+      # Must match the deployed FastAPI backend URL.
+      # In this unified deployment, FastAPI serves on the same origin.
+      - key: VITE_API_BASE_URL
+        value: https://kenko-ai-1.onrender.com

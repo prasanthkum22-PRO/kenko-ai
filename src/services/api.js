@@ -1,23 +1,46 @@
 import axios from 'axios';
 
 export const getApiBaseUrl = () => {
+  // ── Priority 1: Explicit backend env var (MUST be set in production) ──
   const envUrl =
     import.meta.env.VITE_API_BASE_URL ||
     import.meta.env.VITE_API_URL ||
     import.meta.env.VITE_BACKEND_URL;
 
   if (envUrl && typeof envUrl === 'string' && envUrl.trim() !== '') {
-    return envUrl.trim().replace(/\/+$/, '');
+    const resolved = envUrl.trim().replace(/\/+$/, '');
+    if (import.meta.env.DEV) {
+      console.debug(`[API] Base URL (from env): ${resolved}`);
+    }
+    return resolved;
   }
 
+  // ── Priority 2: localhost dev default ─────────────────────────────────
+  // IMPORTANT: In production, NEVER fall back to window.location.origin.
+  // If the frontend and backend are on different hosts (separate Render services),
+  // falling back to origin means API calls hit the React frontend server,
+  // which returns HTML (index.html) instead of JSON — causing BACKEND_RETURNED_HTML.
+  //
+  // Only fall back to origin when the backend is co-deployed on the SAME host
+  // AND that host actually runs FastAPI (unified Render service). This can be
+  // detected by checking if the environment explicitly opted in.
   if (typeof window !== 'undefined' && window.location) {
     const isLocal =
       window.location.hostname === 'localhost' ||
       window.location.hostname === '127.0.0.1';
-    if (!isLocal) {
-      return window.location.origin;
+    if (isLocal) {
+      if (import.meta.env.DEV) {
+        console.debug('[API] Base URL (localhost fallback): http://localhost:8000');
+      }
+      return 'http://localhost:8000';
     }
   }
+
+  // ── Fallback: log a clear warning — this should never happen in production ──
+  console.warn(
+    '[API] WARNING: No VITE_API_BASE_URL configured and not on localhost. ' +
+    'API calls will fail. Set VITE_API_BASE_URL=https://your-backend.onrender.com in your .env file.'
+  );
   return 'http://localhost:8000';
 };
 

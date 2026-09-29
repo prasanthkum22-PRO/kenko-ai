@@ -113,8 +113,10 @@ export default function App() {
                     <Route path="/terms" element={<TermsOfServicePage />} />
                     <Route path="/terms-of-service" element={<TermsOfServicePage />} />
 
-                    {/* Google OAuth Callbacks */}
-                    <Route path="/api/google/callback" element={<GoogleOAuthCallbackPage />} />
+                    {/* Google OAuth Callback pages (frontend destinations AFTER FastAPI processes the OAuth code)
+                        NOTE: /api/google/callback is handled EXCLUSIVELY by FastAPI at the server level.
+                        FastAPI exchanges the code, then redirects the browser to one of these frontend routes.
+                        The GoogleOAuthCallbackPage component handles the google_auth=success/failed URL params. */}
                     <Route path="/auth/google/callback" element={<GoogleOAuthCallbackPage />} />
                     <Route path="/google/callback" element={<GoogleOAuthCallbackPage />} />
                     <Route path="/google-callback" element={<GoogleOAuthCallbackPage />} />

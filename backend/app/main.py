@@ -198,6 +198,11 @@ possible_dist_dirs = [
 ]
 dist_dir = next((d for d in possible_dist_dirs if d.is_dir() and (d / "index.html").is_file()), None)
 
+# Paths that must ALWAYS be handled by FastAPI, never the SPA fallback
+_API_PREFIXES = (
+    "api/", "api", "docs", "redoc", "openapi.json", "health", "uploads/",
+)
+
 if dist_dir:
     logging.info(f"Serving frontend SPA from: {dist_dir}")
     assets_dir = dist_dir / "assets"
@@ -206,11 +211,16 @@ if dist_dir:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa_or_static(full_path: str):
-        # Do not intercept unmatched /api/* requests with HTML
-        if full_path.startswith("api/") or full_path == "api":
+        # ── Critical: NEVER serve HTML for any /api/* route ──────────
+        # Normalize: strip any leading slash so both "api/foo" and "/api/foo" match
+        normalized = full_path.lstrip("/")
+        if any(normalized == prefix.rstrip("/") or normalized.startswith(prefix if prefix.endswith("/") else prefix + "/") for prefix in _API_PREFIXES):
             return JSONResponse(
                 status_code=404,
-                content={"error": "NOT_FOUND", "message": f"API endpoint /{full_path} not found"},
+                content={
+                    "success": False,
+                    "error": {"code": "NOT_FOUND", "message": f"API endpoint /{normalized} not found on this server."},
+                },
             )
         target_file = dist_dir / full_path
         if target_file.is_file():

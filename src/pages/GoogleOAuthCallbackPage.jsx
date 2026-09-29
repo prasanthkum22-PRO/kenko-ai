@@ -5,15 +5,22 @@ import { useToast } from '../context/ToastContext';
 import { IconGoogleMeet, IconCheck, IconAlert } from '../components/icons';
 
 const getApiBaseUrl = () => {
-  const envUrl = import.meta.env.VITE_API_URL;
-  if (typeof window !== 'undefined' && window.location) {
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    if (!isLocal) {
-      if (envUrl && envUrl.startsWith('https://')) return envUrl;
-      return window.location.origin;
-    }
+  const envUrl =
+    import.meta.env.VITE_API_BASE_URL ||
+    import.meta.env.VITE_API_URL ||
+    import.meta.env.VITE_BACKEND_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim() !== '') {
+    return envUrl.trim().replace(/\/+$/, '');
   }
-  return envUrl || 'http://localhost:8000';
+  if (typeof window !== 'undefined' && window.location) {
+    const isLocal =
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1';
+    if (isLocal) return 'http://localhost:8000';
+  }
+  // Never fall back to window.location.origin — that would point to the React
+  // frontend host, causing all /api/* calls to return HTML instead of JSON.
+  return 'http://localhost:8000';
 };
 
 export default function GoogleOAuthCallbackPage() {
